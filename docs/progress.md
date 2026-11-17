@@ -1,10 +1,17 @@
 # 進度
 
-最後更新：2026-11-17（第 1 階段完成）
+最後更新：2026-11-17（第 1 階段完成，使用者已在 iPhone 實測確認）
 
 ## 目前狀態
 
-**第 1 階段程式已完成，等使用者在 iPhone 上實測。**
+**第 1 階段完成（使用者已在 iPhone 實測並確認）。下一步：第 2 階段「雲端」，依規劃開一個新的工作階段來做。**
+
+開始第 2 階段前要知道的事：
+- 工作分支 `claude/confident-babbage-8nlxkb`（也是目前 GitHub Pages 發布的分支）。
+- 第 2 階段需要使用者自己註冊 Supabase、Cloudflare（R2）帳號，不經手密碼；Supabase anon key 可以放進程式（安全靠 RLS），R2 金鑰不能放在 PWA，要用 Edge Function／Worker 代簽上傳網址。
+- 資料模型在 `src/lib/types.ts`，IndexedDB 在 `src/lib/db.ts`（版本 1；改 schema 要升版並寫 upgrade）。照片目前縮圖與顯示版都存在手機上，第 2 階段上傳顯示版後要刪本地副本（plan.md 第 7 節）。
+- 匯出格式 `src/lib/backup.ts`（ledger-diary-backup v1），雲端同步後仍要保留。
+- 瀏覽器端對端測試腳本沒放進 repo（在開發環境的暫存資料夾），新工作階段需要時可以照本文件的功能清單重寫。
 
 - 程式在分支 `claude/confident-babbage-8nlxkb`（React + TypeScript + Vite，Leaflet、idb、fflate、vite-plugin-pwa）。
 - 注意：從 Safari 網址列開是網頁介面；「加入主畫面」後從圖示開才是全螢幕。
@@ -82,7 +89,7 @@
 - [x] 定位按鈕（原「打卡」；使用者決定：不記錄，只把地圖移到目前位置並顯示圓點）
 - [x] 本地資料庫（IndexedDB）
 - [x] 匯出備份
-- [ ] 使用者在 iPhone 上實測
+- [x] 使用者在 iPhone 上實測（搜尋、照片、加入主畫面、離線、匯出匯入、地址與拖動調整位置都確認過）
 
 ## 第 2 階段：雲端
 
