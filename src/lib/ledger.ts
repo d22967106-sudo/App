@@ -93,3 +93,18 @@ export function parseAmount(input: string): number | null {
 export function byTime<T extends { time: number }>(list: T[]): T[] {
   return [...list].sort((a, b) => a.time - b.time)
 }
+
+/** 金額輸入框：輸入時自動加千分位逗號，最多兩位小數（例：1450.5 → 1,450.5） */
+export function formatAmountInput(input: string): string {
+  let s = input.replace(/[^\d.]/g, '')
+  const dot = s.indexOf('.')
+  let dec: string | null = null
+  if (dot >= 0) {
+    dec = s.slice(dot + 1).replace(/\./g, '').slice(0, 2)
+    s = s.slice(0, dot)
+  }
+  s = s.replace(/^0+(?=\d)/, '')
+  const int = s.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  if (dec === null) return int
+  return `${int || '0'}.${dec}`
+}

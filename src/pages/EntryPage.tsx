@@ -7,9 +7,11 @@ import { COUNTRY_NAME, CURRENCIES, currencyForCountry, currencyInfo, formatNumbe
 import { deleteEntry, getEntry, getMeta, newId, saveEntry, setMeta } from '../lib/db'
 import { getCurrentPosition } from '../lib/geo'
 import { parseAreaQuery } from '../lib/areaQuery'
-import { reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
+import { geocodeAddress, reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
+import { parseSharedPlace, type SharedPlace } from '../lib/sharedPlace'
 import { goBack, navigate } from '../lib/hooks'
 import {
+  formatAmountInput,
   formatDateTimeShort,
   formatTime,
   fromDateTimeLocal,
@@ -102,7 +104,7 @@ export function EntryPage({ id, date }: Props) {
       }
       setOriginal(e)
       setKind(e.kind)
-      setAmountText(e.amount != null ? String(e.amount) : '')
+      setAmountText(e.amount != null ? formatAmountInput(String(e.amount)) : '')
       setCurrency(e.currency)
       setRate(e.rate)
       setRateText(String(e.rate))
@@ -138,7 +140,7 @@ export function EntryPage({ id, date }: Props) {
       suggestPlaces(loc).then((r) => seq === locateSeq.current && setRemembered(r))
       const geo = await reverseGeocode(loc)
       if (seq !== locateSeq.current || !geo) return
-      setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode } : cur))
+      setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode, address: geo.address } : cur))
       // 人在國外時自動建議當地幣別
       const local = currencyForCountry(geo.countryCode)
       if (local && isNew && !touched.current.currency) {
@@ -204,7 +206,7 @@ export function EntryPage({ id, date }: Props) {
     if (p.categoryId && kind !== 'diary') setCategoryId(p.categoryId)
     if (!amountText && kind !== 'diary') {
       const a = commonAmount(p.recentAmounts)
-      if (a != null && p.currency === currency) setAmountText(String(a))
+      if (a != null && p.currency === currency) setAmountText(formatAmountInput(String(a)))
     }
   }
 
@@ -214,14 +216,74 @@ export function EntryPage({ id, date }: Props) {
     touched.current.title = true
     setPlaceId(null)
     if (s.categoryId && kind === 'expense' && !touched.current.category) setCategoryId(s.categoryId)
-    // 用店家座標（回家才記帳時，地點也會是店，不是家裡）
+    // 用店家座標（回家才記帳時，地點也會是店，不是家裡），並自動帶入地址
+    moveTo({ lat: s.lat, lng: s.lng })
+  }
+
+  /** 把這筆的地點改到某個座標，再查地名與地址 */
+  function moveTo(p: { lat: number; lng: number }, address?: string) {
     const seq = ++locateSeq.current
     setLocState('done')
-    setLocation((cur) => ({ lat: s.lat, lng: s.lng, countryCode: cur?.countryCode }))
-    reverseGeocode(s).then((geo) => {
+    setLocError('')
+    setLocation((cur) => ({ lat: p.lat, lng: p.lng, countryCode: cur?.countryCode, address }))
+    reverseGeocode(p).then((geo) => {
       if (seq !== locateSeq.current || !geo) return
-      setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode } : cur))
+      setLocation((cur) =>
+        cur ? { ...cur, name: geo.name, countryCode: geo.countryCode, address: address ?? geo.address } : cur,
+      )
     })
+  }
+
+  // ── 輸入地址 ──
+  const [addrOpen, setAddrOpen] = useState(false)
+  const [addrText, setAddrText] = useState('')
+  const [addrState, setAddrState] = useState<'idle' | 'loading' | 'notfound' | 'error'>('idle')
+  const [addrNote, setAddrNote] = useState('')
+
+  async function lookupAddress(q: string) {
+    if (!q.trim()) return
+    setAddrText(q)
+    setAddrState('loading')
+    setAddrNote('')
+    try {
+      const near = location ?? (await getMeta<{ lat: number; lng: number }>('lastPos')) ?? null
+      const r = await geocodeAddress(q, near)
+      if (!r) {
+        setAddrState('notfound')
+        setAddrOpen(true)
+        return
+      }
+      locateSeq.current++ // 取消還在進行中的自動定位
+      setLocState('done')
+      setLocError('')
+      setLocation({ lat: r.lat, lng: r.lng, name: r.name, countryCode: r.countryCode, address: r.address })
+      setAddrState('idle')
+      setAddrOpen(false)
+      setAddrNote(r.approximate ? '門牌查不到，地圖上先定在那條路上' : '')
+    } catch {
+      setAddrState('error')
+      setAddrOpen(true)
+    }
+  }
+
+  // ── 從 Google 地圖／Apple 地圖分享貼上 ──
+  function applyShared(sp: SharedPlace) {
+    if (sp.name) {
+      setTitle(sp.name)
+      setPickedName(sp.name)
+      touched.current.title = true
+    } else {
+      setTitle('')
+    }
+    setPlaceId(null)
+    if (sp.lat != null && sp.lng != null) moveTo({ lat: sp.lat, lng: sp.lng }, sp.address)
+    else if (sp.address) lookupAddress(sp.address)
+    if (!sp.name && !sp.address && sp.lat == null) {
+      toast('只有網址讀不到店名和地址。請在 Google 地圖按「分享」→「複製」，或直接輸入地址', 5000)
+      setAddrOpen(true)
+    } else {
+      toast(sp.address ? '已帶入店名和地址' : '已帶入店名')
+    }
   }
 
   async function runSearch(noArea = false) {
@@ -399,7 +461,7 @@ export function EntryPage({ id, date }: Props) {
                 autoFocus={isNew}
                 onChange={(e) => {
                   touched.current.amount = true
-                  setAmountText(e.target.value.replace(/[^\d.,]/g, ''))
+                  setAmountText(formatAmountInput(e.target.value))
                 }}
                 style={{ width: `${Math.max(3, amountText.length + 1)}ch` }}
               />
@@ -471,8 +533,21 @@ export function EntryPage({ id, date }: Props) {
             placeholder={kind === 'diary' ? '可不填' : '店名，或地區＋店名：嘉義幸福'}
             value={title}
             onChange={(e) => {
+              const shared = parseSharedPlace(e.target.value)
+              if (shared) {
+                applyShared(shared)
+                return
+              }
               setTitle(e.target.value)
               setPlaceId(null)
+            }}
+            onPaste={(e) => {
+              // 貼上時用剪貼簿原文（保留換行），比較好分出店名和地址
+              const shared = parseSharedPlace(e.clipboardData.getData('text'))
+              if (shared) {
+                e.preventDefault()
+                applyShared(shared)
+              }
             }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -599,39 +674,87 @@ export function EntryPage({ id, date }: Props) {
         </div>
       </div>
 
-      <div className="info-list">
-        <button className="info-row" onClick={locate} disabled={locState === 'locating'}>
-          <Icon name="pin" size={20} />
-          <span>
-            {locState === 'locating'
-              ? '定位中…'
-              : location
-                ? (location.name ?? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`)
-                : locState === 'error'
-                  ? locError
-                  : '沒有地點'}
-          </span>
-          {locState === 'locating' ? (
-            <span className="spinner" />
+      <div className="field">
+        <span className="label">地點</span>
+        <div className="info-list">
+          <div className="info-row loc-row">
+            <Icon name="pin" size={20} />
+            <span className="loc-text">
+              <span>
+                {locState === 'locating'
+                  ? '定位中…'
+                  : location
+                    ? (location.name ?? `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`)
+                    : locState === 'error'
+                      ? locError
+                      : '沒有地點'}
+              </span>
+              {location?.address && <small>{location.address}</small>}
+              {addrNote && <small className="hint">{addrNote}</small>}
+            </span>
+            {locState === 'locating' ? (
+              <span className="spinner" />
+            ) : (
+              <button className="link-btn" onClick={locate}>
+                {location ? '用目前位置' : '定位'}
+              </button>
+            )}
+          </div>
+          {addrOpen ? (
+            <div className="addr-edit">
+              <input
+                className="text-input"
+                placeholder="例如：嘉義市東區中山路123號"
+                aria-label="地址"
+                value={addrText}
+                autoFocus
+                enterKeyHint="search"
+                onChange={(e) => {
+                  setAddrText(e.target.value)
+                  setAddrState('idle')
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    lookupAddress(addrText)
+                  }
+                }}
+              />
+              <button className="btn-primary" onClick={() => lookupAddress(addrText)} disabled={addrState === 'loading'}>
+                {addrState === 'loading' ? <span className="spinner" /> : '查詢'}
+              </button>
+              {addrState === 'notfound' && <span className="addr-msg">找不到這個地址，試試看少打一點（例如只打到路名）</span>}
+              {addrState === 'error' && <span className="addr-msg">查詢失敗（網路或服務忙碌），請再試一次</span>}
+            </div>
           ) : (
-            <span className="aside">{location ? (isNew ? '自動定位 · 重新定位' : '重新定位') : '點一下定位'}</span>
+            <button
+              className="info-row"
+              onClick={() => {
+                setAddrOpen(true)
+                setAddrText(location?.address ?? '')
+              }}
+            >
+              <Icon name="edit" size={20} />
+              <span>{location ? '改成輸入地址' : '輸入地址'}</span>
+            </button>
           )}
-        </button>
-        {location && (
-          <button
-            className="info-row"
-            onClick={() => {
-              locateSeq.current++
-              setLocation(null)
-              setLocState('idle')
-              setSearch(null)
-              setRemembered([])
-            }}
-          >
-            <Icon name="close" size={20} />
-            <span>不附地點</span>
-          </button>
-        )}
+          {location && (
+            <button
+              className="info-row"
+              onClick={() => {
+                locateSeq.current++
+                setLocation(null)
+                setLocState('idle')
+                setAddrNote('')
+                setSearch(null)
+                setRemembered([])
+              }}
+            >
+              <Icon name="close" size={20} />
+              <span>不附地點</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {error && (

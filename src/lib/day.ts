@@ -11,7 +11,7 @@ export interface RoutePoint extends GeoPoint {
   ref: { type: 'entry' | 'track'; id: string }
 }
 
-/** 當天路線：打卡點與有地點的紀錄，依時間連線 */
+/** 當天路線：定位點與有地點的紀錄，依時間連線 */
 export function buildRoute(entries: Entry[], track: TrackPoint[]): RoutePoint[] {
   const pts: RoutePoint[] = []
   for (const t of track) pts.push({ lat: t.lat, lng: t.lng, time: t.time, ref: { type: 'track', id: t.id } })

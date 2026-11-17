@@ -13,6 +13,8 @@ export interface EntryLocation extends GeoPoint {
   name?: string
   /** ISO 3166-1 alpha-2 小寫國碼，例如 tw、jp */
   countryCode?: string
+  /** 地址，例如「嘉義市東區中山路 123 號」 */
+  address?: string
 }
 
 /**
@@ -56,7 +58,7 @@ export interface DailySummary {
 
 export type MoodId = 'great' | 'good' | 'okay' | 'tired' | 'sad'
 
-/** 軌跡點：第 1 階段只有手動打卡；之後背景定位也寫在這裡 */
+/** 軌跡點：第 1 階段只有手動定位；之後背景定位也寫在這裡 */
 export interface TrackPoint {
   id: string
   time: number

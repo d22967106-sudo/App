@@ -113,16 +113,16 @@ export function DayPage({ date: rawDate }: { date: string }) {
                 <li key={p.id} className="tl-track">
                   <span className="dot small" />
                   <span>{formatTime(p.time)}</span>
-                  <span>打卡{p.label ? ` ${p.label}` : ''}</span>
+                  <span>定位{p.label ? ` ${p.label}` : ''}</span>
                   <button
                     className="btn-text src"
                     style={{ fontSize: 12, minHeight: 32 }}
-                    aria-label={`刪除 ${formatTime(p.time)} 的打卡`}
+                    aria-label={`刪除 ${formatTime(p.time)} 的定位`}
                     onClick={async () => {
-                      if (confirm('刪除這個打卡點？')) await deleteTrackPoint(p.id)
+                      if (confirm('刪除這個定位點？')) await deleteTrackPoint(p.id)
                     }}
                   >
-                    手動打卡 ×
+                    手動定位 ×
                   </button>
                 </li>
               )
@@ -153,10 +153,10 @@ export function DayPage({ date: rawDate }: { date: string }) {
                       </span>
                     )}
                     {e.note && <p className="note">{e.note}</p>}
-                    {e.location?.name && (
+                    {(e.location?.address || e.location?.name) && (
                       <span className="place">
                         <Icon name="pin" size={13} />
-                        {e.location.name}
+                        {e.location.address ?? e.location.name}
                       </span>
                     )}
                   </button>

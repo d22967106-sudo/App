@@ -7,6 +7,7 @@ import * as db from './db'
 import { countPlaces, distanceM, routeKm } from './geo'
 import { finishSearch, overpassNameRegex, parseNominatimSearch, parseOverpass, parsePhotonSearch, shortPlaceName, viewbox } from './geocode'
 import {
+  formatAmountInput,
   formatDateLong,
   fromDateTimeLocal,
   isDateKey,
@@ -77,6 +78,21 @@ describe('金額', () => {
     ['1.234', null],
     ['', null],
   ])('parseAmount(%s) = %s', (s, v) => expect(parseAmount(s)).toBe(v))
+
+  it.each([
+    ['1450', '1,450'],
+    ['1234567', '1,234,567'],
+    ['1,4500', '14,500'],
+    ['12.345', '12.34'],
+    ['.5', '0.5'],
+    ['1.2.3', '1.23'],
+    ['007', '7'],
+    ['abc', ''],
+  ])('輸入時加千分位 %s → %s', (s, v) => expect(formatAmountInput(s)).toBe(v))
+
+  it('加千分位後仍可解析', () => {
+    expect(parseAmount(formatAmountInput('1450.5'))).toBe(1450.5)
+  })
 
   it('加總沒有浮點誤差', () => {
     expect(sumMoney([0.1, 0.2])).toBe(0.3)
@@ -193,7 +209,7 @@ describe('店名搜尋', () => {
 })
 
 describe('一天的路線與統計', () => {
-  it('打卡與紀錄依時間合併', () => {
+  it('定位與紀錄依時間合併', () => {
     const e1 = entry({ location: taipeiMain, amountTwd: 65, time: 2 })
     const e2 = entry({ kind: 'diary', amount: null, amountTwd: null, time: 3, photoIds: ['p1', 'p2'] })
     const tp: TrackPoint = { id: 't1', time: 1, date: '2026-11-17', ...taipei101, source: 'checkin' }

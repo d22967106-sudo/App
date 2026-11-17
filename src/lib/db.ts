@@ -111,7 +111,7 @@ export async function saveSummary(s: DailySummary): Promise<void> {
   notify()
 }
 
-// ── 軌跡（手動打卡） ──
+// ── 軌跡（手動定位） ──
 
 export async function getTrackByDate(date: string): Promise<TrackPoint[]> {
   const list = await (await getDB()).getAllFromIndex('track', 'date', date)

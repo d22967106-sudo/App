@@ -93,7 +93,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         lat: t.lat,
         lng: t.lng,
         kind: isStart ? 'start' : 'checkin',
-        label: `${formatTime(t.time)} 打卡${t.label ? ' ' + t.label : ''}`,
+        label: `${formatTime(t.time)} 定位${t.label ? ' ' + t.label : ''}`,
       })
     }
     for (const e of entries ?? []) {
@@ -153,7 +153,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     playRaf.current = requestAnimationFrame(tick)
   }
 
-  // ── 手動打卡 ──
+  // ── 手動定位 ──
   const checkIn = async () => {
     setCheckingIn(true)
     try {
@@ -171,7 +171,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         source: 'checkin',
       })
       if (date !== toDateKey(now)) navigate('map', true)
-      toast('已打卡，正在查地名…')
+      toast('已定位，正在查地名…')
       const geo = await reverseGeocode(pos)
       if (geo) {
         await addTrackPoint({
@@ -184,7 +184,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           source: 'checkin',
           label: geo.name,
         })
-        toast(`已打卡：${geo.name}`)
+        toast(`已定位：${geo.name}`)
       }
     } catch (e) {
       toast((e as Error).message, 4000)
@@ -286,9 +286,9 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
             <Icon name={playhead ? 'pause' : 'play'} size={18} />
           </button>
         )}
-        <button className="checkin-btn" onClick={checkIn} disabled={checkingIn} aria-label="手動打卡（記下目前位置）">
-          {checkingIn ? <span className="spinner" /> : <Icon name="flag" size={18} />}
-          打卡
+        <button className="checkin-btn" onClick={checkIn} disabled={checkingIn} aria-label="手動定位（記下目前位置）">
+          {checkingIn ? <span className="spinner" /> : <Icon name="locate" size={18} />}
+          定位
         </button>
         <button className="fab" aria-label="新增紀錄" onClick={() => navigate(`entry/new?d=${date}`)}>
           <Icon name="plus" size={28} strokeWidth={2.4} />
@@ -316,7 +316,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         <div className="sheet-body" ref={listRef}>
           {loaded && timeline.length === 0 && (
             <div className="sheet-empty">
-              {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆，或按「打卡」記下目前位置' : '這天沒有紀錄'}
+              {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆，或按「定位」記下目前位置' : '這天沒有紀錄'}
             </div>
           )}
           {timeline.map((item) =>
@@ -329,10 +329,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
               >
                 <span className="time">{formatTime(item.time)}</span>
                 <span className="badge track">
-                  <Icon name="flag" size={16} />
+                  <Icon name="locate" size={16} />
                 </span>
                 <span className="main">
-                  <span className="title">打卡{item.point.label ? ` · ${item.point.label}` : ''}</span>
+                  <span className="title">定位{item.point.label ? ` · ${item.point.label}` : ''}</span>
                 </span>
               </button>
             ) : (

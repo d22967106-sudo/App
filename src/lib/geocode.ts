@@ -7,6 +7,8 @@ export interface ReverseResult {
   /** 「祇園 · 京都」這種短地名 */
   name: string
   countryCode?: string
+  /** 地址：台灣用「嘉義市東區中山路123號」的寫法 */
+  address?: string
 }
 
 const reverseCache = new Map<string, ReverseResult>()
@@ -34,6 +36,23 @@ export function shortPlaceName(address: Record<string, string>): string {
   return uniq.join(' · ') || address.country || '未知地點'
 }
 
+/** Nominatim 的地址欄位 → 一行地址（台灣用中文寫法，國外用逗號分隔） */
+export function formatAddress(a: Record<string, string>, countryCode?: string): string | undefined {
+  const cc = (countryCode ?? a.country_code ?? '').toLowerCase()
+  const num = a.house_number ? (/號$/.test(a.house_number) ? a.house_number : `${a.house_number}號`) : ''
+  if (cc === 'tw') {
+    const city = a.city || a.county || a.state || ''
+    const district = a.city_district || a.suburb || a.town || a.village || ''
+    const parts = [city, district !== city ? district : '', a.road || '', a.road ? num : '']
+    const s = parts.join('')
+    return s || undefined
+  }
+  const line = [a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road, a.suburb || a.neighbourhood, a.city || a.town || a.village]
+    .filter(Boolean)
+    .join(', ')
+  return line || undefined
+}
+
 /** 座標 → 地名（離線或失敗時回傳 null） */
 export async function reverseGeocode(p: GeoPoint, signal?: AbortSignal): Promise<ReverseResult | null> {
   const key = `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`
@@ -42,15 +61,17 @@ export async function reverseGeocode(p: GeoPoint, signal?: AbortSignal): Promise
   try {
     await nominatimThrottle()
     const url =
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&addressdetails=1` +
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&addressdetails=1` +
       `&accept-language=zh-TW,zh,en&lat=${p.lat}&lon=${p.lng}`
     const res = await fetch(url, { signal })
     if (!res.ok) return null
     const data = (await res.json()) as { address?: Record<string, string> }
     if (!data.address) return null
+    const cc = data.address.country_code?.toLowerCase()
     const result = {
       name: shortPlaceName(data.address),
-      countryCode: data.address.country_code?.toLowerCase(),
+      countryCode: cc,
+      address: formatAddress(data.address, cc),
     }
     reverseCache.set(key, result)
     return result
@@ -420,4 +441,50 @@ export async function searchShops(here: GeoPoint | null, text: string, opts: Sea
   const radius = opts.radius ?? 30000
   const r = await searchInBox(q, boxAround(here, radius), here, radius, boxAround(here, Math.min(radius, 8000)), opts.signal)
   return { ...r, shop: q }
+}
+
+export interface GeocodeResult extends ReverseResult {
+  lat: number
+  lng: number
+  /** 門牌查不到、只找到那條路或那一區（位置是大概的） */
+  approximate: boolean
+}
+
+/** 去掉門牌（123號、123之1號、5樓…），用來在門牌查不到時改找那條路 */
+export function stripHouseNumber(q: string): string {
+  return q
+    .replace(/\s+/g, '')
+    .replace(/\d+(之\d+)?號.*$/, '')
+    .replace(/\d+(巷|弄).*$/, '')
+    .trim()
+}
+
+/** 地址 → 座標（先找完整地址，找不到就去掉門牌改找那條路） */
+export async function geocodeAddress(q: string, near?: GeoPoint | null, signal?: AbortSignal): Promise<GeocodeResult | null> {
+  const full = q.trim()
+  if (!full) return null
+  const tries = [...new Set([full, stripHouseNumber(full)].filter(Boolean))]
+  for (let i = 0; i < tries.length; i++) {
+    await nominatimThrottle()
+    const bias = near ? `&viewbox=${toViewbox(boxAround(near, 50000))}` : ''
+    const url =
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1` +
+      `&accept-language=zh-TW,zh,en${bias}&q=${encodeURIComponent(tries[i])}`
+    const res = await fetchWithTimeout(url, {}, 8000, signal)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const [hit] = (await res.json()) as { lat: string; lon: string; address?: Record<string, string> }[]
+    if (!hit) continue
+    const a = hit.address ?? {}
+    const cc = a.country_code?.toLowerCase()
+    return {
+      lat: Number(hit.lat),
+      lng: Number(hit.lon),
+      name: shortPlaceName(a),
+      countryCode: cc,
+      // 使用者打的完整地址比較準，優先顯示
+      address: full,
+      approximate: i > 0 || (!!full.match(/\d+號/) && !a.house_number),
+    }
+  }
+  return null
 }
