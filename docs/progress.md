@@ -23,12 +23,14 @@
 - 店名搜尋看起來不能用 → ① 店名欄可打字篩選附近店家，按放大鏡或鍵盤「搜尋」查 2 公里內的店名 ② 顯示查詢中／查不到／失敗可重試的狀態 ③ Overpass 三台伺服器輪流（overpass-api.de → overpass.kumi.systems → overpass.private.coffee），每台 9 秒逾時 ④ 附近範圍 150 → 200 公尺。
 - 實測「搜尋失敗」（Overpass 用名字搜尋太慢／太忙）→ 打字搜尋改成依序：**Nominatim search**（限定附近 2 公里方框）→ **Photon**（photon.komoot.io）→ Overpass；逾時改用自己的 AbortController（不依賴 AbortSignal.any）。失敗時在狀態列用小字列出每個服務的失敗原因（例如「nominatim：HTTP 429」），方便截圖回報。
 - 使用者決定**不需要自動列出附近店家** → 已移除（新增紀錄時不再自動查 Overpass）。保留「記住去過的店」（手機本地資料，附近 300 公尺內記過的店）與打字搜尋。plan.md 第 8 節已更新。
+- 「時間要能調整」（常常事後補記）→ 新增紀錄頁的時間改成看得到的日期＋時間兩個欄位，加上「現在／1 小時前／3 小時前／昨天」快速按鈕；存檔後地圖跳到那一天。
+- 「搜尋範圍 2 公里太小」（常常到家才記帳）→ 店名搜尋改成約 30 公里內、近的排前面，連鎖店的不同分店都會列出（Overpass 備案最多 8 公里，太大會逾時）。點選搜尋結果後，紀錄的地點改成那家店的位置並重新查地名（不會記成家裡）。
 
 ### 程式結構
 
 - `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
 - `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
-- 測試：`npm test`（單元測試 33 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
+- 測試：`npm test`（單元測試 34 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
 
 ### 第 1 階段的做法與決定
 

@@ -1633,3 +1633,38 @@ button:disabled {
   color: var(--text-2);
   opacity: 0.8;
 }
+
+/* ── 時間 ── */
+
+.time-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 8px;
+}
+
+.time-row input {
+  min-height: 48px;
+  -webkit-appearance: none;
+  appearance: none;
+  text-align: left;
+}
+
+.quick-times {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.quick-times button {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--card);
+  color: var(--text-body);
+  padding: 4px 14px;
+  font-size: 14px;
+}
+
+.quick-times button:active {
+  background: var(--soft);
+}

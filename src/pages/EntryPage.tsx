@@ -10,12 +10,12 @@ import { reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
 import { goBack, navigate } from '../lib/hooks'
 import {
   formatDateTimeShort,
+  formatTime,
   fromDateTimeLocal,
   isDateKey,
   parseAmount,
   relativeDayLabel,
   toDateKey,
-  toDateTimeLocal,
 } from '../lib/ledger'
 import { processPhoto } from '../lib/photos'
 import { commonAmount, rememberPlace, suggestPlaces, type PlaceSuggestion } from '../lib/places'
@@ -23,6 +23,14 @@ import { getRate } from '../lib/rates'
 import type { Entry, EntryKind, EntryLocation, Photo } from '../lib/types'
 
 type LocState = 'idle' | 'locating' | 'done' | 'error'
+
+const HOUR = 3600_000
+const QUICK_TIMES: { label: string; at: () => number }[] = [
+  { label: '現在', at: () => Date.now() },
+  { label: '1 小時前', at: () => Date.now() - HOUR },
+  { label: '3 小時前', at: () => Date.now() - 3 * HOUR },
+  { label: '昨天', at: () => Date.now() - 24 * HOUR },
+]
 
 const KIND_LABEL: Record<EntryKind, string> = { expense: '支出', income: '收入', diary: '只寫日記' }
 
@@ -205,8 +213,14 @@ export function EntryPage({ id, date }: Props) {
     touched.current.title = true
     setPlaceId(null)
     if (s.categoryId && kind === 'expense' && !touched.current.category) setCategoryId(s.categoryId)
-    // 用店家座標，比 GPS 準
-    setLocation((cur) => ({ ...(cur ?? {}), lat: s.lat, lng: s.lng, accuracy: undefined }) as EntryLocation)
+    // 用店家座標（回家才記帳時，地點也會是店，不是家裡）
+    const seq = ++locateSeq.current
+    setLocState('done')
+    setLocation((cur) => ({ lat: s.lat, lng: s.lng, countryCode: cur?.countryCode }))
+    reverseGeocode(s).then((geo) => {
+      if (seq !== locateSeq.current || !geo) return
+      setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode } : cur))
+    })
   }
 
   async function runSearch() {
@@ -456,7 +470,7 @@ export function EntryPage({ id, date }: Props) {
             autoComplete="off"
           />
           {location && title.trim() && (
-            <button className="search-btn" onClick={runSearch} aria-label={`搜尋附近 2 公里內叫「${title.trim()}」的店`}>
+            <button className="search-btn" onClick={runSearch} aria-label={`搜尋附近叫「${title.trim()}」的店`}>
               <Icon name="search" size={18} />
             </button>
           )}
@@ -532,6 +546,41 @@ export function EntryPage({ id, date }: Props) {
         </label>
       </div>
 
+      <div className="field">
+        <span className="label" id="time-label">
+          時間 <span className="muted" style={{ fontWeight: 400 }}>{tripLabel || formatDateTimeShort(time).split(' ')[0]}</span>
+        </span>
+        <div className="time-row" role="group" aria-labelledby="time-label">
+          <input
+            type="date"
+            className="text-input"
+            aria-label="日期"
+            value={toDateKey(time)}
+            onChange={(e) => {
+              const t = fromDateTimeLocal(`${e.target.value}T${formatTime(time)}`)
+              if (t != null) setTime(t)
+            }}
+          />
+          <input
+            type="time"
+            className="text-input"
+            aria-label="時間"
+            value={formatTime(time)}
+            onChange={(e) => {
+              const t = fromDateTimeLocal(`${toDateKey(time)}T${e.target.value}`)
+              if (t != null) setTime(t)
+            }}
+          />
+        </div>
+        <div className="quick-times">
+          {QUICK_TIMES.map((q) => (
+            <button key={q.label} onClick={() => setTime(q.at())}>
+              {q.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="info-list">
         <button className="info-row" onClick={locate} disabled={locState === 'locating'}>
           <Icon name="pin" size={20} />
@@ -565,20 +614,6 @@ export function EntryPage({ id, date }: Props) {
             <span>不附地點</span>
           </button>
         )}
-        <label className="info-row">
-          <Icon name="clock" size={20} />
-          <span>{formatDateTimeShort(time)}</span>
-          <span className="aside">{tripLabel}</span>
-          <input
-            type="datetime-local"
-            aria-label="時間"
-            value={toDateTimeLocal(time)}
-            onChange={(e) => {
-              const t = fromDateTimeLocal(e.target.value)
-              if (t != null) setTime(t)
-            }}
-          />
-        </label>
       </div>
 
       {error && (
@@ -646,14 +681,14 @@ function ShopStatus({
           <ErrorDetail errors={search.errors} />
         </>
       )
-    else if (!search.shops.length) content = <>附近 2 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
-    else content = <>2 公里內符合「{search.query}」的店家</>
+    else if (!search.shops.length) content = <>附近 30 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
+    else content = <>符合「{search.query}」的店家（近的在前）</>
   } else if (filterText && hasLocation) {
     content = (
       <>
         想找店家？
         <button className="link-btn" onClick={onSearch}>
-          搜尋附近 2 公里
+          搜尋店名
         </button>
       </>
     )

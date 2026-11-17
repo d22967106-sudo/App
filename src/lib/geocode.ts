@@ -175,14 +175,21 @@ export function overpassNameRegex(text: string): string {
     .replace(/\s+/g, '.*')
 }
 
-/** 名字搜尋結果轉成 NearbyShop，去掉太遠、沒名字、重複的 */
-function finishSearch(list: NearbyShop[], center: GeoPoint, radius: number): NearbyShop[] {
+/** 名字搜尋結果：去掉太遠、沒名字、重複的，近的排前面（連鎖店的不同分店都會留著） */
+export function finishSearch(list: NearbyShop[], center: GeoPoint, radius: number): NearbyShop[] {
   const seen = new Set<string>()
   return list
-    .filter((s) => s.name && s.distance <= radius && !seen.has(s.name) && seen.add(s.name))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, 25)
     .map((s) => ({ ...s, distance: Math.round(distanceM(center, s)) }))
+    .filter((s) => s.name && s.distance <= radius)
+    .sort((a, b) => a.distance - b.distance)
+    .filter((s) => {
+      // 同名且在 50 公尺內視為同一家（OSM 有時同一家店會有點和建築物兩筆）
+      const key = `${s.name}@${Math.round(s.lat * 2000)},${Math.round(s.lng * 2000)}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .slice(0, 25)
 }
 
 /** 方形搜尋範圍（給 Nominatim viewbox 用）：左,上,右,下 */
@@ -241,20 +248,20 @@ export function parsePhotonSearch(json: unknown, center: GeoPoint): NearbyShop[]
 }
 
 /**
- * 用店名搜尋附近（預設 2 公里）。
+ * 用店名搜尋附近（預設 30 公里內，近的排前面；回家才記帳也找得到剛剛去的店）。
  * 依序試：Nominatim（OSM 官方搜尋）→ Photon（另一個 OSM 搜尋）→ Overpass
  */
-export async function searchShops(p: GeoPoint, text: string, radius = 2000, signal?: AbortSignal): Promise<ShopResult> {
+export async function searchShops(p: GeoPoint, text: string, radius = 30000, signal?: AbortSignal): Promise<ShopResult> {
   const q = text.trim()
   if (!q) return { ok: true, shops: [] }
   const errors: string[] = []
   let anyOk = false
 
-  // 1. Nominatim：限定在附近的方形範圍內
+  // 1. Nominatim：限定在附近的方形範圍內（同一家連鎖店會有很多間，近的排前面）
   try {
     await nominatimThrottle()
     const url =
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=30&bounded=1&addressdetails=0` +
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&addressdetails=0` +
       `&accept-language=zh-TW,zh,en&viewbox=${viewbox(p, radius)}&q=${encodeURIComponent(q)}`
     const res = await fetchWithTimeout(url, {}, 8000, signal)
     if (res.ok) {
@@ -279,12 +286,13 @@ export async function searchShops(p: GeoPoint, text: string, radius = 2000, sign
     errors.push(describeError('photon', e))
   }
 
-  // 3. Overpass：最慢，最後才用
+  // 3. Overpass：最慢，最後才用；範圍太大會逾時，最多查 8 公里
   const re = overpassNameRegex(q)
+  const opRadius = Math.min(radius, 8000)
   const query =
     `[out:json][timeout:20];(` +
-    `nwr(around:${radius},${p.lat},${p.lng})["name"~"${re}",i]${POI_FILTER};` +
-    `nwr(around:${radius},${p.lat},${p.lng})["name:zh"~"${re}",i]${POI_FILTER};` +
+    `nwr(around:${opRadius},${p.lat},${p.lng})["name"~"${re}",i]${POI_FILTER};` +
+    `nwr(around:${opRadius},${p.lat},${p.lng})["name:zh"~"${re}",i]${POI_FILTER};` +
     `);out center 40;`
   const r = await runOverpass(query, p, signal, 15000)
   if (r.ok) return { ok: true, shops: finishSearch(r.shops, p, radius) }

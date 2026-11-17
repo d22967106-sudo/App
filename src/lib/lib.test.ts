@@ -5,7 +5,7 @@ import { currencyForCountry, formatCurrency, rateFromPerTwd, toTwd } from './cur
 import { buildRoute, buildTimeline, dayStats } from './day'
 import * as db from './db'
 import { countPlaces, distanceM, routeKm } from './geo'
-import { overpassNameRegex, parseNominatimSearch, parseOverpass, parsePhotonSearch, shortPlaceName, viewbox } from './geocode'
+import { finishSearch, overpassNameRegex, parseNominatimSearch, parseOverpass, parsePhotonSearch, shortPlaceName, viewbox } from './geocode'
 import {
   formatDateLong,
   fromDateTimeLocal,
@@ -164,6 +164,18 @@ describe('店名搜尋', () => {
     )
     expect(r.map((s) => s.name)).toEqual(['誠品'])
     expect(r[0]).toMatchObject({ categoryId: 'shopping', kindLabel: '書店' })
+  })
+
+  it('搜尋結果近的排前面，連鎖店分店都保留，太遠的去掉', () => {
+    const shop = (name: string, lat: number) => ({
+      osmId: name + lat, name, lat, lng: taipei101.lng, distance: 0, categoryId: null, kindLabel: '',
+    })
+    const r = finishSearch(
+      [shop('7-ELEVEN', 25.06), shop('7-ELEVEN', 25.035), shop('7-ELEVEN', 25.03501), shop('7-ELEVEN', 26)],
+      taipei101,
+      30000,
+    )
+    expect(r.map((s) => s.lat)).toEqual([25.035, 25.06])
   })
 
   it('viewbox 約為上下左右各 2 公里', () => {
