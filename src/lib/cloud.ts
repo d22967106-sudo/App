@@ -181,7 +181,11 @@ export async function signUpWithPassword(email: string, password: string): Promi
     if (res.status === 429) throw new CloudError('嘗試太多次了，請過一陣子再試', 429)
     throw new CloudError(`建立帳號失敗：${msg}`, res.status)
   }
-  const body = (await res.json()) as Partial<TokenResponse>
+  const body = (await res.json()) as Partial<TokenResponse> & { identities?: unknown[]; user?: { identities?: unknown[] } }
+  // 信箱已經註冊過時，Supabase 為了不洩漏帳號存在，會回傳一個 identities 是空的假使用者
+  const identities = body.identities ?? body.user?.identities
+  if (!body.access_token && Array.isArray(identities) && identities.length === 0)
+    throw new CloudError('這個信箱已經有帳號了：請直接登入；如果沒設定過密碼，到 Supabase → Authentication → Users 刪掉這個帳號再重新建立', 422)
   // 需要信箱確認時不會回傳 token
   if (!body.access_token) return null
   const s = toSession(body as TokenResponse, email)
