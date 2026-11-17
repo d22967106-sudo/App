@@ -2,9 +2,14 @@
 name = "ledger-photos"
 main = "photos.js"
 compatibility_date = "2026-11-01"
-# SUPABASE_URL、SUPABASE_KEY 在 Cloudflare 後台設定，部署時保留
+# 其他在 Cloudflare 後台加的變數，部署時保留
 keep_vars = true
 
 [[r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "ledger-photos"
+
+# Supabase 網址與公開金鑰（publishable key 本來就是公開的，安全靠 RLS 與登入 token）
+[vars]
+SUPABASE_URL = "https://ouyvyqcfesoguhkjebsj.supabase.co"
+SUPABASE_KEY = "sb_publishable_RaL0tkuTt_fUK8gWY-2XDg_p6el5wyU"
