@@ -27,6 +27,8 @@ interface Props {
   onSelect?: (id: string) => void
   /** 播放中的位置 */
   playhead?: GeoPoint | null
+  /** 按「定位」後的目前位置（at 變了就移過去） */
+  myLocation?: (GeoPoint & { at: number }) | null
   /** 小地圖：不能拖動 */
   static?: boolean
   /** 沒有任何點時的中心 */
@@ -85,6 +87,7 @@ export function MapView({
   selectedId,
   onSelect,
   playhead,
+  myLocation,
   static: isStatic = false,
   fallbackCenter,
   bottomPadding = 0,
@@ -97,6 +100,7 @@ export function MapView({
   const layerRef = useRef<L.LayerGroup | null>(null)
   const markerRefs = useRef(new Map<string, L.Marker>())
   const playRef = useRef<L.Marker | null>(null)
+  const meRef = useRef<L.Marker | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
   const style = useMapStyle()
@@ -234,6 +238,27 @@ export function MapView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
+
+  // 目前位置：顯示圓點並移過去（不記錄）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !myLocation) return
+    const ll = L.latLng(myLocation.lat, myLocation.lng)
+    if (!meRef.current) {
+      meRef.current = L.marker(ll, {
+        icon: L.divIcon({ className: '', html: '<div class="mk mk-me"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }),
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 900,
+      }).addTo(map)
+    } else {
+      meRef.current.setLatLng(ll)
+    }
+    const zoom = Math.max(map.getZoom(), 16)
+    const pt = map.project(ll, zoom).add([0, (bottomPadding - topPadding) / 2])
+    map.flyTo(map.unproject(pt, zoom), zoom, { duration: 0.6 })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myLocation?.at])
 
   // 播放位置
   useEffect(() => {

@@ -7,10 +7,9 @@ import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
 import { buildRoute, buildTimeline, dayStats, type RoutePoint } from '../lib/day'
-import { addTrackPoint, getEntriesByDate, getMeta, getPhoto, getTrackByDate, newId, setMeta } from '../lib/db'
+import { getEntriesByDate, getMeta, getPhoto, getTrackByDate, setMeta } from '../lib/db'
 import { entrySubtitle, entryTitle, shortAmount } from '../lib/display'
 import { getCurrentPosition } from '../lib/geo'
-import { reverseGeocode } from '../lib/geocode'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import type { Entry, GeoPoint } from '../lib/types'
@@ -153,39 +152,15 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     playRaf.current = requestAnimationFrame(tick)
   }
 
-  // ── 手動定位 ──
-  const checkIn = async () => {
+  // ── 定位：把地圖移到目前位置（不記錄） ──
+  const [myPos, setMyPos] = useState<(GeoPoint & { at: number }) | null>(null)
+  const locateMe = async () => {
     setCheckingIn(true)
     try {
       const pos = await getCurrentPosition()
       await setMeta('lastPos', { lat: pos.lat, lng: pos.lng })
-      const id = newId()
-      const now = Date.now()
-      await addTrackPoint({
-        id,
-        time: now,
-        date: toDateKey(now),
-        lat: pos.lat,
-        lng: pos.lng,
-        accuracy: pos.accuracy,
-        source: 'checkin',
-      })
-      if (date !== toDateKey(now)) navigate('map', true)
-      toast('已定位，正在查地名…')
-      const geo = await reverseGeocode(pos)
-      if (geo) {
-        await addTrackPoint({
-          id,
-          time: now,
-          date: toDateKey(now),
-          lat: pos.lat,
-          lng: pos.lng,
-          accuracy: pos.accuracy,
-          source: 'checkin',
-          label: geo.name,
-        })
-        toast(`已定位：${geo.name}`)
-      }
+      setSelected(null)
+      setMyPos({ lat: pos.lat, lng: pos.lng, at: Date.now() })
     } catch (e) {
       toast((e as Error).message, 4000)
     } finally {
@@ -241,6 +216,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         selectedId={selected}
         onSelect={(id) => setSelected(id)}
         playhead={playhead}
+        myLocation={myPos}
         fallbackCenter={lastPos ?? TAIPEI}
         bottomPadding={peek + 56}
         topPadding={70}
@@ -286,7 +262,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
             <Icon name={playhead ? 'pause' : 'play'} size={18} />
           </button>
         )}
-        <button className="checkin-btn" onClick={checkIn} disabled={checkingIn} aria-label="手動定位（記下目前位置）">
+        <button className="checkin-btn" onClick={locateMe} disabled={checkingIn} aria-label="定位：地圖移到目前位置">
           {checkingIn ? <span className="spinner" /> : <Icon name="locate" size={18} />}
           定位
         </button>
@@ -316,7 +292,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         <div className="sheet-body" ref={listRef}>
           {loaded && timeline.length === 0 && (
             <div className="sheet-empty">
-              {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆，或按「定位」記下目前位置' : '這天沒有紀錄'}
+              {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆' : '這天沒有紀錄'}
             </div>
           )}
           {timeline.map((item) =>

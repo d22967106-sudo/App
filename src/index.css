@@ -1720,3 +1720,13 @@ button:disabled {
   font-size: 13px;
   color: var(--danger);
 }
+
+/* 目前位置（按「定位」時顯示，不記錄） */
+.mk-me {
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background: #4f7cac;
+  border: 4px solid #fff;
+  box-shadow: 0 0 0 8px rgba(79, 124, 172, 0.25), 0 1px 4px rgba(0, 0, 0, 0.25);
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseSharedPlace } from './sharedPlace'
-import { formatAddress, stripHouseNumber } from './geocode'
+import { formatAddress, parseTwAddress, stripHouseNumber } from './geocode'
 
 describe('從地圖 App 分享貼上', () => {
   it('Google 地圖分享文字：店名＋地址＋短網址', () => {
@@ -52,5 +52,24 @@ describe('地址', () => {
   it('門牌查不到時去掉門牌改找那條路', () => {
     expect(stripHouseNumber('嘉義市東區中山路 123 號')).toBe('嘉義市東區中山路')
     expect(stripHouseNumber('台北市信義區松仁路100巷5號3樓')).toBe('台北市信義區松仁路')
+  })
+})
+
+describe('拆解台灣地址', () => {
+  it('去掉郵遞區號與村里', () => {
+    expect(parseTwAddress('600嘉義市東區芳草里芳安路3號')).toEqual({
+      county: '嘉義市', district: '東區', road: '芳安路', number: '3', clean: '嘉義市東區芳安路3號',
+    })
+  })
+  it('段、之、樓、鄰、台寫法', () => {
+    expect(parseTwAddress('台北市大安區新生南路三段100之2號5樓')).toMatchObject({
+      county: '臺北市', district: '大安區', road: '新生南路三段', number: '100之2',
+    })
+    expect(parseTwAddress('嘉義縣民雄鄉東榮村12鄰建國路一段8號')).toMatchObject({
+      county: '嘉義縣', district: '民雄鄉', road: '建國路一段', number: '8',
+    })
+  })
+  it('不是台灣地址就原樣', () => {
+    expect(parseTwAddress('1-2-3 Gion, Kyoto').road).toBeUndefined()
   })
 })

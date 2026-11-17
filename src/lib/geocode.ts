@@ -1,5 +1,5 @@
 import { guessCategoryFromOsm } from './categories'
-import { parseAreaQuery, type AreaTarget } from './areaQuery'
+import { parseAreaQuery, TW_COUNTIES, type AreaTarget } from './areaQuery'
 import { distanceM } from './geo'
 import type { GeoPoint } from './types'
 
@@ -459,32 +459,120 @@ export function stripHouseNumber(q: string): string {
     .trim()
 }
 
-/** 地址 → 座標（先找完整地址，找不到就去掉門牌改找那條路） */
+export interface TwAddress {
+  county?: string
+  district?: string
+  road?: string
+  number?: string
+  /** 去掉郵遞區號、村里、鄰之後的完整地址 */
+  clean: string
+}
+
+/**
+ * 拆解台灣地址：「600嘉義市東區芳草里芳安路3號」→
+ * 縣市 嘉義市、區 東區、路 芳安路、門牌 3（郵遞區號、芳草里會被拿掉，OSM 通常沒有村里資料）
+ */
+export function parseTwAddress(input: string): TwAddress {
+  let s = input.replace(/\s+/g, '').replace(/^\d{3,6}/, '').replace(/^(臺灣|台灣)/, '')
+  const out: TwAddress = { clean: '' }
+  const county = TW_COUNTIES.find((c) => s.startsWith(c) || s.startsWith(c.replace(/^臺/, '台')))
+  if (county) {
+    out.county = county
+    s = s.slice(county.length)
+  }
+  const d = /^(.{1,3}?[區鄉鎮市])(?=.)/.exec(s)
+  if (d && !/[路街段巷弄號]/.test(d[1])) {
+    out.district = d[1]
+    s = s.slice(d[1].length)
+  }
+  s = s.replace(/^.{1,4}?[里村](?=.)/, '').replace(/^\d+鄰/, '')
+  const r = /^(.+?(路|街|大道|道)(.{1,2}段)?)/.exec(s)
+  if (r) {
+    out.road = r[1]
+    s = s.slice(r[1].length)
+  }
+  const n = /(\d+(之\d+)?)號/.exec(s)
+  if (n) out.number = n[1]
+  out.clean = [out.county, out.district, out.road, out.number ? `${out.number}號` : ''].filter(Boolean).join('') || input.trim()
+  return out
+}
+
+interface GeoHit {
+  lat: number
+  lng: number
+  address: Record<string, string>
+}
+
+async function nominatimOne(params: string, near: GeoPoint | null | undefined, signal?: AbortSignal): Promise<GeoHit | null> {
+  await nominatimThrottle()
+  const bias = near ? `&viewbox=${toViewbox(boxAround(near, 80000))}` : ''
+  const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&accept-language=zh-TW,zh,en${bias}&${params}`
+  const res = await fetchWithTimeout(url, {}, 8000, signal)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const [hit] = (await res.json()) as { lat: string; lon: string; address?: Record<string, string> }[]
+  return hit ? { lat: Number(hit.lat), lng: Number(hit.lon), address: hit.address ?? {} } : null
+}
+
+async function photonOne(q: string, near: GeoPoint | null | undefined, signal?: AbortSignal): Promise<GeoHit | null> {
+  const bias = near ? `&lat=${near.lat}&lon=${near.lng}` : ''
+  const res = await fetchWithTimeout(`https://photon.komoot.io/api/?limit=1${bias}&q=${encodeURIComponent(q)}`, {}, 8000, signal)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const f = ((await res.json()) as { features?: { geometry?: { coordinates?: number[] }; properties?: Record<string, string> }[] }).features?.[0]
+  const c = f?.geometry?.coordinates
+  if (!f || !c) return null
+  const p = f.properties ?? {}
+  return {
+    lat: c[1],
+    lng: c[0],
+    address: { country_code: p.countrycode ?? '', city: p.city ?? '', city_district: p.district ?? '', road: p.street ?? '', house_number: p.housenumber ?? '' },
+  }
+}
+
+/**
+ * 地址 → 座標。台灣地址依序試：完整地址 → 結構化（路＋門牌、縣市）→ 路＋區＋縣市 → 路＋縣市 → Photon。
+ * 門牌查不到時定在那條路上（approximate）。
+ */
 export async function geocodeAddress(q: string, near?: GeoPoint | null, signal?: AbortSignal): Promise<GeocodeResult | null> {
   const full = q.trim()
   if (!full) return null
-  const tries = [...new Set([full, stripHouseNumber(full)].filter(Boolean))]
-  for (let i = 0; i < tries.length; i++) {
-    await nominatimThrottle()
-    const bias = near ? `&viewbox=${toViewbox(boxAround(near, 50000))}` : ''
-    const url =
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1` +
-      `&accept-language=zh-TW,zh,en${bias}&q=${encodeURIComponent(tries[i])}`
-    const res = await fetchWithTimeout(url, {}, 8000, signal)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const [hit] = (await res.json()) as { lat: string; lon: string; address?: Record<string, string> }[]
-    if (!hit) continue
-    const a = hit.address ?? {}
-    const cc = a.country_code?.toLowerCase()
-    return {
-      lat: Number(hit.lat),
-      lng: Number(hit.lon),
-      name: shortPlaceName(a),
-      countryCode: cc,
-      // 使用者打的完整地址比較準，優先顯示
-      address: full,
-      approximate: i > 0 || (!!full.match(/\d+號/) && !a.house_number),
+  const tw = parseTwAddress(full)
+  const enc = encodeURIComponent
+  const tries: { run: () => Promise<GeoHit | null>; exact: boolean }[] = []
+  if (tw.road) {
+    const city = tw.county ?? ''
+    tries.push({ run: () => nominatimOne(`q=${enc(tw.clean)}`, near, signal), exact: true })
+    if (tw.number && city)
+      tries.push({ run: () => nominatimOne(`street=${enc(`${tw.number} ${tw.road}`)}&city=${enc(city)}&countrycodes=tw`, near, signal), exact: true })
+    if (tw.district) tries.push({ run: () => nominatimOne(`q=${enc(`${tw.road}, ${tw.district}, ${city}`)}`, near, signal), exact: false })
+    tries.push({ run: () => nominatimOne(`q=${enc(`${tw.road}, ${city}`)}${city ? '&countrycodes=tw' : ''}`, near, signal), exact: false })
+    tries.push({ run: () => photonOne(`${city}${tw.district ?? ''}${tw.road}`, near, signal), exact: false })
+  } else {
+    tries.push({ run: () => nominatimOne(`q=${enc(full)}`, near, signal), exact: true })
+    tries.push({ run: () => nominatimOne(`q=${enc(stripHouseNumber(full))}`, near, signal), exact: false })
+    tries.push({ run: () => photonOne(full, near, signal), exact: false })
+  }
+  let lastError: unknown = null
+  let anyOk = false
+  for (const t of tries) {
+    try {
+      const hit = await t.run()
+      anyOk = true
+      if (!hit) continue
+      const a = hit.address
+      const cc = a.country_code?.toLowerCase() || (tw.county ? 'tw' : undefined)
+      return {
+        lat: hit.lat,
+        lng: hit.lng,
+        name: shortPlaceName(a) === '未知地點' && tw.district ? `${tw.district} · ${tw.county ?? ''}` : shortPlaceName(a),
+        countryCode: cc,
+        // 使用者打的地址比較完整，優先顯示（去掉郵遞區號）
+        address: full.replace(/^\d{3,6}\s*/, ''),
+        approximate: !t.exact || (!!tw.number && !a.house_number),
+      }
+    } catch (e) {
+      lastError = e
     }
   }
+  if (!anyOk && lastError) throw lastError
   return null
 }

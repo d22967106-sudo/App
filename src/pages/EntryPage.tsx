@@ -8,7 +8,7 @@ import { deleteEntry, getEntry, getMeta, newId, saveEntry, setMeta } from '../li
 import { getCurrentPosition } from '../lib/geo'
 import { parseAreaQuery } from '../lib/areaQuery'
 import { geocodeAddress, reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
-import { parseSharedPlace, type SharedPlace } from '../lib/sharedPlace'
+import { looksLikeAddress, parseSharedPlace, type SharedPlace } from '../lib/sharedPlace'
 import { goBack, navigate } from '../lib/hooks'
 import {
   formatAmountInput,
@@ -543,10 +543,17 @@ export function EntryPage({ id, date }: Props) {
             }}
             onPaste={(e) => {
               // 貼上時用剪貼簿原文（保留換行），比較好分出店名和地址
-              const shared = parseSharedPlace(e.clipboardData.getData('text'))
+              const text = e.clipboardData.getData('text').trim()
+              const shared = parseSharedPlace(text)
               if (shared) {
                 e.preventDefault()
                 applyShared(shared)
+              } else if (looksLikeAddress(text) && /(市|縣).*\d+(之\d+)?號/.test(text)) {
+                // 只貼了地址（例如從 Google 地圖複製地址）：拿去定位，不當店名
+                e.preventDefault()
+                setAddrOpen(true)
+                lookupAddress(text)
+                toast('這看起來是地址，已用來定位這筆紀錄')
               }
             }}
             onKeyDown={(e) => {
