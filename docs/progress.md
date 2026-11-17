@@ -1,10 +1,31 @@
 # 進度
 
-最後更新：2026-11-17
+最後更新：2026-11-17（第 1 階段完成）
 
 ## 目前狀態
 
-**規劃完成，尚未開始寫程式。** 下一步：開始第 1 階段（使用者說「開始」或「繼續做」時）。
+**第 1 階段程式已完成，等使用者在 iPhone 上實測。**
+
+- 程式在分支 `claude/confident-babbage-8nlxkb`（React + TypeScript + Vite，Leaflet、idb、fflate、vite-plugin-pwa）。
+- 發布：`.github/workflows/deploy.yml` 會在 push 時 build 並發布到 GitHub Pages。
+  使用者要先做：① repo 改公開（免費方案 Pages 需要公開 repo）② Settings › Pages › Source 選「GitHub Actions」。
+  網址會是 https://d22967106-sudo.github.io/App/
+- 下一步：使用者實測回饋 → 修正 → 進第 2 階段（雲端）。
+
+### 程式結構
+
+- `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
+- `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
+- 測試：`npm test`（單元測試 27 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
+
+### 第 1 階段的做法與決定
+
+- 路線＝當天「打卡點」＋「有地點的紀錄」依時間連直線；第 3 階段背景定位的軌跡點也寫進同一個 `track` 資料表。
+- 地圖圖磚加上褐色濾鏡接近焦糖奶茶色；去過的圖磚由 Service Worker 暫存（最多 3000 張、60 天）。
+- 匯率來源：open.er-api.com（主要）、jsDelivr 的 fawazahmed0 currency-api（備用），一天抓一次存在 IndexedDB；抓不到時可手動輸入。
+- 照片：縮圖長邊 400px、顯示版長邊 2048px，優先 WebP，瀏覽器輸出不了就用 JPEG 80%（第 1 階段兩種都存在手機上）。
+- 地點數：120 公尺內算同一個地點。記住去過的店：同名且 150 公尺內算同一家。
+- 底部「統計」分頁暫時放本月合計＋資料備份（匯出／匯入 zip）。
 
 ## 討論與設計（已完成）
 
@@ -16,18 +37,18 @@
 
 ## 第 1 階段：核心 App
 
-- [ ] 專案骨架（PWA manifest、Service Worker、GitHub Pages 發布）
-- [ ] 地圖首頁（Leaflet＋OSM、當天路線、標記、下方時間軸面板）
-- [ ] 日期切換
-- [ ] 新增紀錄（支出／收入／只寫日記、金額、分類、日記、時間）
-- [ ] 自動定位＋地名
-- [ ] 附近店家查詢＋記住去過的店
-- [ ] 多幣別與匯率
-- [ ] 照片選取與壓縮（暫存本地）
-- [ ] 一天的完整回顧（每日總結＋時間軸）
-- [ ] 手動打卡
-- [ ] 本地資料庫（IndexedDB）
-- [ ] 匯出備份
+- [x] 專案骨架（PWA manifest、Service Worker、GitHub Pages 發布）
+- [x] 地圖首頁（Leaflet＋OSM、當天路線、標記、下方時間軸面板）
+- [x] 日期切換
+- [x] 新增紀錄（支出／收入／只寫日記、金額、分類、日記、時間）
+- [x] 自動定位＋地名
+- [x] 附近店家查詢＋記住去過的店
+- [x] 多幣別與匯率
+- [x] 照片選取與壓縮（暫存本地）
+- [x] 一天的完整回顧（每日總結＋時間軸）
+- [x] 手動打卡
+- [x] 本地資料庫（IndexedDB）
+- [x] 匯出備份
 - [ ] 使用者在 iPhone 上實測
 
 ## 第 2 階段：雲端
@@ -53,4 +74,8 @@
 
 ## 已知問題
 
-（尚無）
+- 在這個開發環境連不到 OSM、Nominatim、Overpass、匯率 API，這些只用假資料測過，要在 iPhone 上確認真的能用。
+- iOS Safari 的 canvas 可能無法輸出 WebP，會自動改用 JPEG（計畫中的 WASM 編碼器還沒做，看實測檔案大小再決定）。
+- Nominatim／Overpass 是免費公共服務，有速率限制；查不到時店名可手動輸入。
+- 圖磚暫存只會存「看過的區域」；「出國前預先下載旅遊地區」還沒做。
+- 金額欄輸入時不會自動加千分位逗號（顯示時有）。
