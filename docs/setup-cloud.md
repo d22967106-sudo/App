@@ -63,16 +63,24 @@ App 用**電子郵件＋自己設定的密碼**登入（Supabase 新的免費專
 2. Name：`ledger-photos`，Location：Automatic，Storage class：**Standard**。
 3. 按 **Create bucket**。**不要**開啟 Public access（照片只透過下面的 Worker 存取）。
 
-### B3. 建立 Worker（照片伺服器）
-1. 左邊選單 **Workers & Pages**（在 **Compute** 底下）→ **Create** → **Create Worker**（或 **Start with Hello World!**）。
-2. Name：`ledger-photos` → **Deploy**。
-3. 部署完按 **Edit code**，把左邊 `worker.js` 的內容**全部刪掉**，換成這個檔案的全部內容：
-   https://raw.githubusercontent.com/d22967106-sudo/App/claude/start-phase-two-wqljng/worker/photos.js
-4. 按右上 **Deploy**。
+### B3. 建立 Worker（照片伺服器）——從 GitHub 部署，不用貼程式碼
+（iPhone 上 Cloudflare 的程式編輯器很難貼上，所以讓 Cloudflare 直接從 GitHub 抓程式碼。）
+
+1. 左邊選單 **Workers & Pages**（在 **Compute** 底下）→ **Create** → **Import a repository**（或 **Connect to Git**）。
+2. 第一次會要求連接 GitHub：按 **Connect GitHub**，授權後選 `d22967106-sudo/App`。
+3. 設定：
+   - Project name：`ledger-photos`
+   - Branch：`claude/start-phase-two-wqljng`
+   - **Root directory**（在 Advanced／Build settings 裡）：`worker`
+   - Build command：留空；Deploy command：`npx wrangler deploy`（預設值）
+4. 按 **Save and Deploy**，等它跑完顯示成功。
+   （如果之前已經用 Hello World 建過同名的 `ledger-photos`，先到那個 Worker 的 **Settings** → 最下面 **Delete** 刪掉，或改到它的 **Settings → Build → Connect** 連接上面這個 repo，設定一樣。）
+
+R2 綁定（`PHOTOS` → `ledger-photos`）已經寫在 `worker/wrangler.toml` 裡，部署時會自動設定，B4 第 1 步可以跳過，只要確認有出現就好。
 
 ### B4. 連接儲存桶與設定變數
 回到這個 Worker 的頁面 → **Settings**：
-1. **Bindings** → **Add** → **R2 bucket**
+1. （從 GitHub 部署的話會自動設定，確認 **Bindings** 裡有 `PHOTOS` 就好）**Bindings** → **Add** → **R2 bucket**
    - Variable name：`PHOTOS`（一定要大寫、一字不差）
    - R2 bucket：`ledger-photos`
    - 按 **Add Binding**／**Deploy**
