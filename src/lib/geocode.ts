@@ -1,4 +1,5 @@
 import { guessCategoryFromOsm } from './categories'
+import { parseAreaQuery, type AreaTarget } from './areaQuery'
 import { distanceM } from './geo'
 import type { GeoPoint } from './types'
 
@@ -66,6 +67,8 @@ export interface NearbyShop {
   distance: number
   categoryId: string | null
   kindLabel: string
+  /** 區＋路名（地區搜尋時顯示，比距離有用） */
+  address?: string
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -123,6 +126,13 @@ export interface ShopResult {
   shops: NearbyShop[]
   /** 失敗原因（給使用者截圖回報用），例如「overpass-api.de：逾時」 */
   errors?: string[]
+  /** 地區搜尋：解析出來的地區與店名 */
+  area?: string
+  shop?: string
+  /** 找不到這個地區 */
+  areaMissing?: boolean
+  /** 搜附近但沒有定位 */
+  needLocation?: boolean
 }
 
 /** 有逾時的 fetch（不用 AbortSignal.any，舊版 iOS 也能用） */
@@ -192,11 +202,46 @@ export function finishSearch(list: NearbyShop[], center: GeoPoint, radius: numbe
     .slice(0, 25)
 }
 
-/** 方形搜尋範圍（給 Nominatim viewbox 用）：左,上,右,下 */
-export function viewbox(p: GeoPoint, radius: number): string {
+/** 經緯度方框 */
+export interface Box {
+  south: number
+  west: number
+  north: number
+  east: number
+}
+
+export function boxAround(p: GeoPoint, radius: number): Box {
   const dLat = radius / 111320
   const dLng = radius / (111320 * Math.cos((p.lat * Math.PI) / 180))
-  return [p.lng - dLng, p.lat + dLat, p.lng + dLng, p.lat - dLat].map((n) => n.toFixed(5)).join(',')
+  return { south: p.lat - dLat, west: p.lng - dLng, north: p.lat + dLat, east: p.lng + dLng }
+}
+
+export function boxCenter(b: Box): GeoPoint {
+  return { lat: (b.south + b.north) / 2, lng: (b.west + b.east) / 2 }
+}
+
+export function unionBox(boxes: Box[]): Box | null {
+  if (!boxes.length) return null
+  return {
+    south: Math.min(...boxes.map((b) => b.south)),
+    west: Math.min(...boxes.map((b) => b.west)),
+    north: Math.max(...boxes.map((b) => b.north)),
+    east: Math.max(...boxes.map((b) => b.east)),
+  }
+}
+
+/** Nominatim viewbox：左,上,右,下 */
+const toViewbox = (b: Box) => [b.west, b.north, b.east, b.south].map((n) => n.toFixed(5)).join(',')
+
+/** 附近 radius 公尺的方形範圍（給 Nominatim viewbox 用） */
+export function viewbox(p: GeoPoint, radius: number): string {
+  return toViewbox(boxAround(p, radius))
+}
+
+/** 搜尋結果下方的小字：區＋路名 */
+function shortAddress(parts: (string | undefined)[]): string | undefined {
+  const list = parts.filter((x): x is string => !!x)
+  return list.length ? [...new Set(list)].slice(0, 2).join(' · ') : undefined
 }
 
 export function parseNominatimSearch(json: unknown, center: GeoPoint): NearbyShop[] {
@@ -208,7 +253,8 @@ export function parseNominatimSearch(json: unknown, center: GeoPoint): NearbySho
     if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) continue
     const cls = String(raw.category ?? raw.class ?? '')
     const type = String(raw.type ?? '')
-    if (/^(highway|boundary|place|landuse|natural|waterway|railway)$/.test(cls) && cls !== 'railway') continue
+    if (/^(highway|boundary|place|landuse|natural|waterway)$/.test(cls)) continue
+    const a = (raw.address ?? {}) as Record<string, string>
     out.push({
       osmId: `${raw.osm_type}/${raw.osm_id}`,
       name,
@@ -217,6 +263,7 @@ export function parseNominatimSearch(json: unknown, center: GeoPoint): NearbySho
       distance: Math.round(distanceM(center, { lat, lng })),
       categoryId: guessCategoryFromOsm({ [cls]: type }),
       kindLabel: KIND_LABEL[type] ?? '',
+      address: shortAddress([a.city_district || a.suburb || a.town || a.village || a.city, a.road]),
     })
   }
   return out
@@ -242,59 +289,135 @@ export function parsePhotonSearch(json: unknown, center: GeoPoint): NearbyShop[]
       distance: Math.round(distanceM(center, { lat, lng })),
       categoryId: guessCategoryFromOsm(p.osm_key ? { [p.osm_key]: p.osm_value ?? '' } : {}),
       kindLabel: KIND_LABEL[p.osm_value ?? ''] ?? '',
+      address: shortAddress([p.district || p.locality || p.city, p.street]),
     })
   }
   return out
 }
 
-/**
- * 用店名搜尋附近（預設 30 公里內，近的排前面；回家才記帳也找得到剛剛去的店）。
- * 依序試：Nominatim（OSM 官方搜尋）→ Photon（另一個 OSM 搜尋）→ Overpass
- */
-export async function searchShops(p: GeoPoint, text: string, radius = 30000, signal?: AbortSignal): Promise<ShopResult> {
-  const q = text.trim()
-  if (!q) return { ok: true, shops: [] }
+const areaCache = new Map<string, Box | null>()
+
+/** 地名 → 範圍方框（Nominatim，同一個地名只查一次） */
+async function geocodeBox(q: string, taiwan: boolean, signal?: AbortSignal): Promise<Box | null> {
+  const key = `${taiwan ? 'tw:' : ''}${q}`
+  if (areaCache.has(key)) return areaCache.get(key)!
+  await nominatimThrottle()
+  const url =
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&accept-language=zh-TW,zh,en` +
+    `${taiwan ? '&countrycodes=tw' : ''}&q=${encodeURIComponent(q)}`
+  const res = await fetchWithTimeout(url, {}, 8000, signal)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  const [hit] = (await res.json()) as { boundingbox?: string[] }[]
+  const bb = hit?.boundingbox?.map(Number)
+  const box = bb && bb.length === 4 && bb.every(Number.isFinite) ? { south: bb[0], north: bb[1], west: bb[2], east: bb[3] } : null
+  areaCache.set(key, box)
+  return box
+}
+
+async function resolveArea(area: AreaTarget, signal?: AbortSignal): Promise<Box | null> {
+  const boxes: Box[] = []
+  for (const q of area.queries) {
+    const b = await geocodeBox(q, area.taiwan, signal)
+    if (b) boxes.push(b)
+  }
+  return unionBox(boxes)
+}
+
+/** 在方框內用名字找店：Nominatim → Photon → Overpass */
+async function searchInBox(
+  q: string,
+  box: Box,
+  center: GeoPoint,
+  maxDistance: number,
+  overpassBox: Box,
+  signal?: AbortSignal,
+): Promise<ShopResult> {
   const errors: string[] = []
   let anyOk = false
 
-  // 1. Nominatim：限定在附近的方形範圍內（同一家連鎖店會有很多間，近的排前面）
+  // 1. Nominatim：限定在方框內（同一家連鎖店會有很多間，近的排前面）
   try {
     await nominatimThrottle()
     const url =
-      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&addressdetails=0` +
-      `&accept-language=zh-TW,zh,en&viewbox=${viewbox(p, radius)}&q=${encodeURIComponent(q)}`
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&addressdetails=1` +
+      `&accept-language=zh-TW,zh,en&viewbox=${toViewbox(box)}&q=${encodeURIComponent(q)}`
     const res = await fetchWithTimeout(url, {}, 8000, signal)
     if (res.ok) {
       anyOk = true
-      const shops = finishSearch(parseNominatimSearch(await res.json(), p), p, radius)
+      const shops = finishSearch(parseNominatimSearch(await res.json(), center), center, maxDistance)
       if (shops.length) return { ok: true, shops }
     } else errors.push(describeError('nominatim', null, res))
   } catch (e) {
     errors.push(describeError('nominatim', e))
   }
 
-  // 2. Photon：以目前位置為中心找，再濾掉太遠的
+  // 2. Photon：同樣限定方框，以中心點排序
   try {
-    const url = `https://photon.komoot.io/api/?limit=30&lat=${p.lat}&lon=${p.lng}&q=${encodeURIComponent(q)}`
+    const bbox = [box.west, box.south, box.east, box.north].map((n) => n.toFixed(5)).join(',')
+    const c = boxCenter(box)
+    const url = `https://photon.komoot.io/api/?limit=40&lat=${c.lat}&lon=${c.lng}&bbox=${bbox}&q=${encodeURIComponent(q)}`
     const res = await fetchWithTimeout(url, {}, 8000, signal)
     if (res.ok) {
       anyOk = true
-      const shops = finishSearch(parsePhotonSearch(await res.json(), p), p, radius)
+      const shops = finishSearch(parsePhotonSearch(await res.json(), center), center, maxDistance)
       if (shops.length) return { ok: true, shops }
     } else errors.push(describeError('photon', null, res))
   } catch (e) {
     errors.push(describeError('photon', e))
   }
 
-  // 3. Overpass：最慢，最後才用；範圍太大會逾時，最多查 8 公里
+  // 3. Overpass：最慢，最後才用；範圍太大會逾時，所以範圍另外限制
   const re = overpassNameRegex(q)
-  const opRadius = Math.min(radius, 8000)
+  const b = `${overpassBox.south},${overpassBox.west},${overpassBox.north},${overpassBox.east}`
   const query =
     `[out:json][timeout:20];(` +
-    `nwr(around:${opRadius},${p.lat},${p.lng})["name"~"${re}",i]${POI_FILTER};` +
-    `nwr(around:${opRadius},${p.lat},${p.lng})["name:zh"~"${re}",i]${POI_FILTER};` +
+    `nwr(${b})["name"~"${re}",i]${POI_FILTER};` +
+    `nwr(${b})["name:zh"~"${re}",i]${POI_FILTER};` +
     `);out center 40;`
-  const r = await runOverpass(query, p, signal, 15000)
-  if (r.ok) return { ok: true, shops: finishSearch(r.shops, p, radius) }
+  const r = await runOverpass(query, center, signal, 15000)
+  if (r.ok) return { ok: true, shops: finishSearch(r.shops, center, maxDistance) }
   return { ok: anyOk, shops: [], errors: [...errors, ...(r.errors ?? [])] }
+}
+
+export interface SearchOptions {
+  /** 不把開頭當地區，整串當店名 */
+  noArea?: boolean
+  /** 搜附近時的範圍（公尺） */
+  radius?: number
+  signal?: AbortSignal
+}
+
+/**
+ * 店名搜尋：
+ * - 「嘉義幸福」「京都 抹茶」→ 在那個地區找（見 areaQuery.ts）
+ * - 其他 → 附近約 30 公里內，近的排前面（回家才記帳也找得到剛剛去的店）
+ * here 是目前位置（沒有定位時只能用地區搜尋）
+ */
+export async function searchShops(here: GeoPoint | null, text: string, opts: SearchOptions = {}): Promise<ShopResult> {
+  const q = text.trim()
+  if (!q) return { ok: true, shops: [] }
+  const parsed = opts.noArea ? null : parseAreaQuery(q)
+
+  if (parsed) {
+    let target = { area: parsed.area, shop: parsed.shop }
+    let box: Box | null
+    try {
+      box = await resolveArea(parsed.area, opts.signal)
+      if (!box && parsed.fallback) {
+        target = parsed.fallback
+        box = await resolveArea(parsed.fallback.area, opts.signal)
+      }
+    } catch (e) {
+      return { ok: false, shops: [], area: parsed.area.label, shop: parsed.shop, errors: [describeError('nominatim（地區）', e)] }
+    }
+    if (!box) return { ok: true, shops: [], area: target.area.label, shop: target.shop, areaMissing: true }
+    const center = here ?? boxCenter(box)
+    const r = await searchInBox(target.shop, box, center, Infinity, box, opts.signal)
+    return { ...r, area: target.area.label, shop: target.shop }
+  }
+
+  if (!here) return { ok: true, shops: [], needLocation: true, shop: q }
+  const radius = opts.radius ?? 30000
+  const r = await searchInBox(q, boxAround(here, radius), here, radius, boxAround(here, Math.min(radius, 8000)), opts.signal)
+  return { ...r, shop: q }
 }

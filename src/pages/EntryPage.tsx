@@ -6,6 +6,7 @@ import { categoriesFor, defaultCategory } from '../lib/categories'
 import { COUNTRY_NAME, CURRENCIES, currencyForCountry, currencyInfo, formatNumber, formatTwd, toTwd } from '../lib/currency'
 import { deleteEntry, getEntry, getMeta, newId, saveEntry, setMeta } from '../lib/db'
 import { getCurrentPosition } from '../lib/geo'
+import { parseAreaQuery } from '../lib/areaQuery'
 import { reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
 import { goBack, navigate } from '../lib/hooks'
 import {
@@ -223,13 +224,26 @@ export function EntryPage({ id, date }: Props) {
     })
   }
 
-  async function runSearch() {
+  async function runSearch(noArea = false) {
     const q = title.trim()
-    if (!q || !location) return
-    setSearch({ query: q, state: 'loading', shops: [] })
-    const r = await searchShops(location, q)
+    if (!q) return
+    const parsed = noArea ? null : parseAreaQuery(q)
+    setSearch({ query: q, state: 'loading', shops: [], area: parsed?.area.label, shop: parsed?.shop ?? q, noArea })
+    const r = await searchShops(location, q, { noArea })
     setSearch((cur) =>
-      cur?.query === q ? { query: q, state: r.ok ? 'ok' : 'error', shops: r.shops, errors: r.errors ?? [] } : cur,
+      cur?.query === q
+        ? {
+            query: q,
+            state: r.ok ? 'ok' : 'error',
+            shops: r.shops,
+            errors: r.errors ?? [],
+            area: r.area,
+            shop: r.shop ?? q,
+            areaMissing: r.areaMissing,
+            needLocation: r.needLocation,
+            noArea,
+          }
+        : cur,
     )
   }
 
@@ -454,7 +468,7 @@ export function EntryPage({ id, date }: Props) {
           <input
             id="title"
             className="text-input"
-            placeholder={kind === 'diary' ? '可不填' : '輸入或從下面選'}
+            placeholder={kind === 'diary' ? '可不填' : '店名，或地區＋店名：嘉義幸福'}
             value={title}
             onChange={(e) => {
               setTitle(e.target.value)
@@ -469,8 +483,8 @@ export function EntryPage({ id, date }: Props) {
             enterKeyHint="search"
             autoComplete="off"
           />
-          {location && title.trim() && (
-            <button className="search-btn" onClick={runSearch} aria-label={`搜尋附近叫「${title.trim()}」的店`}>
+          {title.trim() && (
+            <button className="search-btn" onClick={() => runSearch()} aria-label={`搜尋「${title.trim()}」`}>
               <Icon name="search" size={18} />
             </button>
           )}
@@ -488,7 +502,11 @@ export function EntryPage({ id, date }: Props) {
                 {s.name}
                 <small>
                   {s.kindLabel ? `${s.kindLabel} · ` : ''}
-                  {s.distance >= 1000 ? `${(s.distance / 1000).toFixed(1)}km` : `${s.distance}m`}
+                  {searching?.area && s.address
+                    ? s.address
+                    : s.distance >= 1000
+                      ? `${(s.distance / 1000).toFixed(1)}km`
+                      : `${s.distance}m`}
                 </small>
               </button>
             ))}
@@ -643,6 +661,12 @@ interface SearchState {
   state: 'loading' | 'ok' | 'error'
   shops: NearbyShop[]
   errors?: string[]
+  /** 地區搜尋時的地區名稱與店名 */
+  area?: string
+  shop?: string
+  areaMissing?: boolean
+  needLocation?: boolean
+  noArea?: boolean
 }
 
 /** 失敗原因小字：使用者截圖回報時看得出是哪個服務出問題 */
@@ -660,36 +684,65 @@ function ShopStatus({
   hasLocation: boolean
   filterText: string
   search: SearchState | null
-  onSearch: () => void
+  onSearch: (noArea?: boolean) => void
 }) {
   let content: React.ReactNode = null
+  const where = search?.area ? `「${search.area}」` : '附近'
+  const what = `「${search?.shop ?? search?.query ?? ''}」`
+  // 解析錯了（例如店名剛好是地名開頭）可以改成整串當店名
+  const wholeBtn = search?.area && (
+    <button className="link-btn" onClick={() => onSearch(true)}>
+      不是地區？整串當店名搜尋
+    </button>
+  )
   if (search) {
     if (search.state === 'loading')
       content = (
         <>
           <span className="spinner" />
-          搜尋「{search.query}」中…
+          在{where}找{what}中…
         </>
       )
     else if (search.state === 'error')
       content = (
         <>
           搜尋失敗（網路或服務忙碌）
-          <button className="link-btn" onClick={onSearch}>
+          <button className="link-btn" onClick={() => onSearch(search.noArea)}>
             重試
           </button>
           <ErrorDetail errors={search.errors} />
         </>
       )
-    else if (!search.shops.length) content = <>附近 30 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
-    else content = <>符合「{search.query}」的店家（近的在前）</>
-  } else if (filterText && hasLocation) {
+    else if (search.areaMissing)
+      content = (
+        <>
+          找不到「{search.area}」這個地區
+          {wholeBtn}
+        </>
+      )
+    else if (search.needLocation) content = '沒有定位，只能用「地區＋店名」搜尋，例如：嘉義幸福'
+    else if (!search.shops.length)
+      content = (
+        <>
+          {search.area ? `「${search.area}」` : '附近 30 公里內'}找不到{what}，直接用你輸入的店名即可
+          {wholeBtn}
+        </>
+      )
+    else
+      content = (
+        <>
+          {search.area ? `「${search.area}」` : ''}符合{what}的店家{search.area ? '' : '（近的在前）'}
+          {wholeBtn}
+        </>
+      )
+  } else if (filterText) {
     content = (
       <>
-        想找店家？
-        <button className="link-btn" onClick={onSearch}>
+        {hasLocation ? '想找店家？' : ''}
+        <button className="link-btn" onClick={() => onSearch()}>
           搜尋店名
         </button>
+        <span className="muted">可以在前面加地區，例如：嘉義幸福</span>
       </>
     )
   }
