@@ -1,16 +1,33 @@
 # 進度
 
-最後更新：2026-11-17（第 2 階段程式完成，等使用者設定雲端帳號後實測）
+最後更新：2026-11-17（第 2 階段完成，使用者已在 iPhone 實測確認）
+
+## ⚠️ 給接手者的教訓（使用者特別交代，務必銘記）
+
+第 2 階段花了很久，**主要原因是引導使用者設定外部服務時，給了很多過時的資訊**，讓使用者一直卡關：
+- 叫使用者改 Supabase 登入信範本 → 新的免費專案從 2026 年 6 月起不能改（要先設自訂 SMTP），只好改成密碼登入。
+- 教學寫「打開這個網址複製內容」→ 使用者把網址本身貼進 SQL Editor。
+- 叫使用者在 iPhone 上貼程式碼到 Cloudflare 編輯器 → 手機上貼不了；改成從 GitHub 部署，又遇到介面上找不到 branch／root directory、Worker 名稱猜錯、Root directory 和 `-c` 路徑重複、在 Cloudflare 後台加的變數沒生效等問題，來回好幾輪。
+- iOS Safari 的 IndexedDB Blob 限制沒事先考慮到，實機同步才出錯。
+
+**接手時請做到：**
+1. 叫使用者操作任何第三方後台（Supabase、Cloudflare、Apple 捷徑、Scriptable、Overland／OwnTracks…）之前，**先上網查最新的官方文件與限制**，不要憑記憶寫步驟；不確定的地方直接說不確定。
+2. 使用者**只用 iPhone**（沒有電腦）：避免「在網頁編輯器貼程式碼」「複製長網址內容」這類手機上難做的步驟；能用設定檔、GitHub 自動部署、或直接把要貼的內容放在對話裡給他複製，就那樣做。
+3. 能由程式／設定檔處理的（例如 Worker 變數寫進 `wrangler.toml`），就不要叫使用者去後台手動設定。
+4. 一次只給一小段步驟，並說明「成功時會看到什麼」，讓使用者能自己判斷有沒有做對。
 
 ## 目前狀態
 
-**第 2 階段程式完成，使用者已設定好 Supabase 與 Cloudflare，iPhone 上同步與照片上傳到 R2 已確認可用（2026-11-17）。離線補傳、刪除同步已實測 OK。待查：清除暫存後重新下載的大圖看起來像素變低（已在看大圖時加上下載狀態／失敗原因的提示，等使用者回報畫面上的文字與 R2 裡 display 檔大小）。**
+**第 2 階段完成（2026-11-17），使用者已在 iPhone 實測：同步、照片上傳到 R2、大圖從雲端下載、離線補傳、刪除同步都正常。下一步：第 3 階段「自動化」，開新的工作階段來做。**
 
-- 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages，第 2 階段已上線）。
-- Supabase 網址與 publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（使用者提供，公開值），Cloudflare 後台不用再設變數。
-- 照片伺服器（Cloudflare Worker `ledger-photos`，網址 https://ledger-photos.d22967106.workers.dev）由 Cloudflare 從 GitHub repo 的**預設分支** `claude/confident-babbage-8nlxkb` 的 `worker/` 部署（Cloudflare 改不了分支）。2026-11-17 經使用者同意，已把第 2 階段 fast-forward 合併進該分支；之後改 `worker/` 也要同步到預設分支。
-- 使用者要做的事：照 `docs/setup-cloud.md` 建 Supabase 專案、執行 `supabase/schema.sql`（已完成）、關閉 Confirm email、建 R2 bucket 與 Worker（`worker/photos.js`），然後在 App「統計 → 雲端同步」貼上網址與公開金鑰並登入。
-- 待確認：Cloudflare 開通 R2 是否要求綁信用卡（網路資料說法不一）。如果要，而使用者不想綁，替代方案是 Supabase Storage（免費 1 GB），需要和使用者討論。
+- 大圖畫質：使用者曾覺得從雲端下載的大圖「像素變低」，查證後是設計如此（顯示版長邊 2048、JPEG 80%，例如 1179×2556 的截圖變 945×2048），使用者接受，不改。
+- 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages）。
+- **GitHub repo 的預設分支是 `claude/confident-babbage-8nlxkb`**，目前內容和 `claude/start-phase-two-wqljng` 相同（經使用者同意 fast-forward 合併過）。照片伺服器由 Cloudflare 從預設分支的 `worker/` 自動部署，所以**改 `worker/` 時要同步推到預設分支**（推到工作分支以外的分支前要先問使用者）。
+- 照片伺服器：Cloudflare Worker `ledger-photos`，網址 https://ledger-photos.d22967106.workers.dev（`/health` 顯示 ok 表示設定正確）。Cloudflare Build 設定：Root directory＝`worker`，Build command＝`echo ok`，Deploy command＝`npx wrangler deploy`。R2 bucket `ledger-photos`。
+- Supabase 專案網址 https://ouyvyqcfesoguhkjebsj.supabase.co，publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（公開值）；App 裡的雲端設定由使用者自己貼上。Confirm email 已關閉。
+- 提醒使用者：Supabase 的 **Allow new users to sign up** 要關閉（第 2 階段最後有提醒，沒確認過有沒有關，第 3 階段開始時順便問一次）。
+- 開發環境連不到 workers.dev、github.io、supabase.co（代理擋掉），只能靠使用者回報或 GitHub Actions 的結果確認。
+- 第 3 階段開始前要知道：背景定位 App（Overland／OwnTracks）要能把軌跡送進 Supabase 的 `track_points` 表（格式見下面「資料表」）；可能需要一個接收端（Supabase Edge Function 或在現有 Worker 加路由）把它們的格式轉成 `{id, updated_at, deleted, data}`。Scriptable 小工具可用 `entries` 的 `date` 欄位查當天資料。**動手前先查這些 App 目前的最新版本與設定方式**。
 
 ### 第 2 階段的做法
 
@@ -114,7 +131,7 @@
 - [x] R2 照片上傳（`worker/photos.js`，Worker＋R2 綁定）、縮圖／顯示版、大圖暫存
 - [x] 設定教學 `docs/setup-cloud.md`
 - [x] 使用者註冊 Supabase／Cloudflare 並設定（2026-11-17；照片已確認存到 R2）
-- [ ] 使用者在 iPhone 上實測（登入、同步、照片上傳與大圖下載、離線後補傳）
+- [x] 使用者在 iPhone 上實測（登入、同步、照片上傳與大圖下載、離線後補傳、刪除同步）
 
 ## 第 3 階段：自動化
 
@@ -135,7 +152,6 @@
 
 - iOS Safari 不能把「從 IndexedDB 讀出來的 Blob」或「網路下載的 Blob」直接再存回 IndexedDB（Error preparing Blob/File data to be stored in object store）。已改成：再存之前用 `freshBlob()` 複製成新 Blob；大圖暫存改存 ArrayBuffer。之後新增寫入照片的程式都要注意這點。
 
-- 第 2 階段只用假的 Supabase／Worker 測過，真實服務（寄信、RLS、R2）要等使用者設定後在 iPhone 上確認。
 - 匯入舊備份會把資料排進上傳佇列；如果雲端有比較新的版本，伺服器會保留新的，但手機上會留著匯入的舊版本（單一裝置使用時不會發生）。
 - 「下載這趟旅程的照片離線看」要等第 4 階段做旅程時一起做。
 - 照片在第 1 階段原本兩種尺寸都存在手機上，登入後上傳完會把大圖移到暫存，暫存超過上限就會刪掉（雲端還有）。
