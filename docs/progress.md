@@ -7,6 +7,7 @@
 **第 2 階段程式完成（2026-11-17），等使用者註冊 Supabase／Cloudflare 並照 `docs/setup-cloud.md` 設定後在 iPhone 實測。**
 
 - 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages，第 2 階段已上線）。
+- 照片伺服器（Cloudflare Worker `ledger-photos1`）由 Cloudflare 從 GitHub repo 的**預設分支** `claude/confident-babbage-8nlxkb` 的 `worker/` 部署（Cloudflare 改不了分支）。2026-11-17 經使用者同意，已把第 2 階段 fast-forward 合併進該分支；之後改 `worker/` 也要同步到預設分支。
 - 使用者要做的事：照 `docs/setup-cloud.md` 建 Supabase 專案、執行 `supabase/schema.sql`（已完成）、關閉 Confirm email、建 R2 bucket 與 Worker（`worker/photos.js`），然後在 App「統計 → 雲端同步」貼上網址與公開金鑰並登入。
 - 待確認：Cloudflare 開通 R2 是否要求綁信用卡（網路資料說法不一）。如果要，而使用者不想綁，替代方案是 Supabase Storage（免費 1 GB），需要和使用者討論。
 
