@@ -4,7 +4,7 @@
 
 ## 目前狀態
 
-**第 2 階段程式完成（2026-11-17），等使用者註冊 Supabase／Cloudflare 並照 `docs/setup-cloud.md` 設定後在 iPhone 實測。**
+**第 2 階段程式完成，使用者已設定好 Supabase 與 Cloudflare，iPhone 上同步與照片上傳到 R2 已確認可用（2026-11-17）。剩下：關閉註冊、實測大圖下載／離線補傳，回饋後修正。**
 
 - 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages，第 2 階段已上線）。
 - Supabase 網址與 publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（使用者提供，公開值），Cloudflare 後台不用再設變數。
@@ -113,7 +113,7 @@
 - [x] 同步與離線佇列
 - [x] R2 照片上傳（`worker/photos.js`，Worker＋R2 綁定）、縮圖／顯示版、大圖暫存
 - [x] 設定教學 `docs/setup-cloud.md`
-- [ ] 使用者註冊 Supabase／Cloudflare 並設定
+- [x] 使用者註冊 Supabase／Cloudflare 並設定（2026-11-17；照片已確認存到 R2）
 - [ ] 使用者在 iPhone 上實測（登入、同步、照片上傳與大圖下載、離線後補傳）
 
 ## 第 3 階段：自動化
