@@ -52,8 +52,15 @@ export default {
     const url = new URL(request.url)
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
     if (url.pathname === '/health') {
-      const ready = !!env.PHOTOS && !!env.SUPABASE_URL && !!env.SUPABASE_KEY
-      return reply(ready ? 'ok' : '設定不完整：請確認 PHOTOS 綁定與 SUPABASE_URL、SUPABASE_KEY 變數', ready ? 200 : 500)
+      const missing = []
+      if (!env.PHOTOS) missing.push('PHOTOS（R2 綁定）')
+      if (!env.SUPABASE_URL) missing.push('SUPABASE_URL（變數）')
+      if (!env.SUPABASE_KEY) missing.push('SUPABASE_KEY（變數）')
+      if (env.SUPABASE_URL && !/^https:\/\/[^/]+$/.test(env.SUPABASE_URL.trim())) missing.push('SUPABASE_URL 格式不對（要像 https://xxxx.supabase.co，結尾不要 /）')
+      const have = Object.keys(env).join(', ') || '（沒有）'
+      return missing.length
+        ? reply(`設定不完整，缺少：${missing.join('、')}\n目前這個 Worker 看得到的名稱：${have}`, 500)
+        : reply('ok')
     }
 
     const m = /^\/photos\/([A-Za-z0-9-]{1,64})(?:\/(thumb|display))?$/.exec(url.pathname)
