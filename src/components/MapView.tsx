@@ -103,8 +103,6 @@ export function MapView({
   const meRef = useRef<L.Marker | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
-  const style = useMapStyle()
-
   // 建立地圖
   useEffect(() => {
     const el = elRef.current!
@@ -134,49 +132,7 @@ export function MapView({
   }, [])
 
   // 底圖（換樣式時換掉）
-  const [tileFilter, setTileFilter] = useState('none')
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map) return
-    let layer: L.Layer | null = null
-    let cancelled = false
-
-    const addRaster = (r: RasterStyle) => {
-      setTileFilter(r.filter)
-      layer = L.tileLayer(r.url, {
-        maxZoom: r.maxZoom,
-        subdomains: r.subdomains ?? 'abc',
-        attribution: r.attribution,
-      }).addTo(map)
-      ;(layer as L.TileLayer).bringToBack()
-    }
-
-    const addStyle = async (st: MapStyle) => {
-      if (st.kind === 'raster') return addRaster(st)
-      setTileFilter('none')
-      try {
-        const spec = await loadVectorStyle(st.styleUrl)
-        if (cancelled) return
-        layer = maplibreGL({
-          style: st.transform(spec) as never,
-          attributionControl: false,
-          // 中日韓文字用手機內建字型，不用下載
-          localIdeographFontFamily: "'PingFang TC', 'Noto Sans TC', sans-serif",
-        })
-        layer.getAttribution = () => st.attribution
-        layer.addTo(map)
-      } catch {
-        // 第一次就離線、或服務暫時連不到：改用點陣地圖
-        if (!cancelled) addRaster(FALLBACK_RASTER)
-      }
-    }
-
-    addStyle(style)
-    return () => {
-      cancelled = true
-      layer?.remove()
-    }
-  }, [style])
+  const tileFilter = useBaseLayer(mapRef)
 
   // 畫路線與標記
   const routeKey = JSON.stringify(route.map((p) => [p.lat, p.lng]))
@@ -290,6 +246,57 @@ export function MapView({
     />
   )
 }
+
+
+/** 依目前選的地圖樣式加上底圖（向量或點陣），回傳點陣圖要套的 CSS 濾鏡。新增紀錄的地圖選點也用這個 */
+export function useBaseLayer(mapRef: React.RefObject<L.Map | null>): string {
+  const style = useMapStyle()
+  const [tileFilter, setTileFilter] = useState('none')
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    let layer: L.Layer | null = null
+    let cancelled = false
+
+    const addRaster = (r: RasterStyle) => {
+      setTileFilter(r.filter)
+      layer = L.tileLayer(r.url, {
+        maxZoom: r.maxZoom,
+        subdomains: r.subdomains ?? 'abc',
+        attribution: r.attribution,
+      }).addTo(map)
+      ;(layer as L.TileLayer).bringToBack()
+    }
+
+    const addStyle = async (st: MapStyle) => {
+      if (st.kind === 'raster') return addRaster(st)
+      setTileFilter('none')
+      try {
+        const spec = await loadVectorStyle(st.styleUrl)
+        if (cancelled) return
+        layer = maplibreGL({
+          style: st.transform(spec) as never,
+          attributionControl: false,
+          // 中日韓文字用手機內建字型，不用下載
+          localIdeographFontFamily: "'PingFang TC', 'Noto Sans TC', sans-serif",
+        })
+        layer.getAttribution = () => st.attribution
+        layer.addTo(map)
+      } catch {
+        // 第一次就離線、或服務暫時連不到：改用點陣地圖
+        if (!cancelled) addRaster(FALLBACK_RASTER)
+      }
+    }
+
+    addStyle(style)
+    return () => {
+      cancelled = true
+      layer?.remove()
+    }
+  }, [style, mapRef])
+  return tileFilter
+}
+
 
 const styleCache = new Map<string, Promise<StyleSpec>>()
 

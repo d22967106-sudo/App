@@ -1,6 +1,7 @@
 import type React from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
+import { MapPicker } from '../components/MapPicker'
 import { PhotoImg, toast } from '../components/ui'
 import { categoriesFor, defaultCategory } from '../lib/categories'
 import { COUNTRY_NAME, CURRENCIES, currencyForCountry, currencyInfo, formatNumber, formatTwd, toTwd } from '../lib/currency'
@@ -232,6 +233,13 @@ export function EntryPage({ id, date }: Props) {
         cur ? { ...cur, name: geo.name, countryCode: geo.countryCode, address: address ?? geo.address } : cur,
       )
     })
+  }
+
+  // ── 在地圖上手動調整 ──
+  const [pickerStart, setPickerStart] = useState<{ lat: number; lng: number } | null>(null)
+  async function openPicker() {
+    const start = location ?? (await getMeta<{ lat: number; lng: number }>('lastPos')) ?? { lat: 25.0418, lng: 121.5435 }
+    setPickerStart({ lat: start.lat, lng: start.lng })
   }
 
   // ── 輸入地址 ──
@@ -745,6 +753,10 @@ export function EntryPage({ id, date }: Props) {
               <span>{location ? '改成輸入地址' : '輸入地址'}</span>
             </button>
           )}
+          <button className="info-row" onClick={openPicker}>
+            <Icon name="map" size={20} />
+            <span>在地圖上調整</span>
+          </button>
           {location && (
             <button
               className="info-row"
@@ -763,6 +775,19 @@ export function EntryPage({ id, date }: Props) {
           )}
         </div>
       </div>
+
+      {pickerStart && (
+        <MapPicker
+          start={pickerStart}
+          onCancel={() => setPickerStart(null)}
+          onConfirm={(p) => {
+            setPickerStart(null)
+            setAddrNote('')
+            setAddrOpen(false)
+            moveTo(p)
+          }}
+        />
+      )}
 
       {error && (
         <p className="error-text" role="alert">

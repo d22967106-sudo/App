@@ -1730,3 +1730,110 @@ button:disabled {
   border: 4px solid #fff;
   box-shadow: 0 0 0 8px rgba(79, 124, 172, 0.25), 0 1px 4px rgba(0, 0, 0, 0.25);
 }
+
+/* ── 在地圖上調整位置 ── */
+
+.picker {
+  position: fixed;
+  inset: 0;
+  z-index: 3800;
+  background: var(--map);
+}
+
+.picker-pin {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 700;
+  width: 44px;
+  height: 58px;
+  margin: -58px 0 0 -22px; /* 針尖對準正中央 */
+  pointer-events: none;
+  transition: transform 0.15s ease;
+}
+
+.picker-pin svg {
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+}
+
+.picker-pin.lifted {
+  transform: translateY(-10px);
+}
+
+.picker-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: -3px;
+  width: 12px;
+  height: 6px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: rgba(58, 38, 24, 0.35);
+}
+
+.picker-pin.lifted .picker-shadow {
+  transform: translateY(10px) scale(1.4);
+  opacity: 0.6;
+}
+
+.picker-top {
+  position: absolute;
+  top: calc(var(--safe-top) + 12px);
+  left: 16px;
+  right: 16px;
+  z-index: 700;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.picker-hint {
+  flex: 1;
+  background: var(--card);
+  border-radius: 22px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 14px;
+  box-shadow: var(--shadow);
+}
+
+.picker-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 700;
+  background: var(--card);
+  border-radius: 24px 24px 0 0;
+  box-shadow: var(--sheet-shadow);
+  padding: 16px 20px calc(var(--safe-bottom) + 16px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.picker-label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--primary);
+  min-height: 24px;
+}
+
+.picker-label span {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.picker-ok {
+  height: 48px;
+  border-radius: 24px;
+}
+
+.picker .leaflet-bottom {
+  bottom: calc(var(--safe-bottom) + 130px);
+}
