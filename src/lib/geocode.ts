@@ -110,7 +110,7 @@ export function parseOverpass(json: unknown, center: GeoPoint, limit = 25): Near
   return out.sort((a, b) => a.distance - b.distance).slice(0, limit)
 }
 
-/** 免費的公共 Overpass 伺服器；第一台忙碌或沒回應就換下一台 */
+/** 免費的公共 Overpass 伺服器（店名搜尋的最後備案）；第一台忙碌或沒回應就換下一台 */
 export const OVERPASS_ENDPOINTS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -166,12 +166,6 @@ async function runOverpass(query: string, center: GeoPoint, signal?: AbortSignal
 }
 
 const POI_FILTER = '[~"^(amenity|shop|tourism|leisure|craft|office)$"~"."]'
-
-/** 附近有名字的店家、景點 */
-export function nearbyShops(p: GeoPoint, radius = 200, signal?: AbortSignal): Promise<ShopResult> {
-  const q = `[out:json][timeout:8];nwr(around:${radius},${p.lat},${p.lng})[name]${POI_FILTER};out center 80;`
-  return runOverpass(q, p, signal)
-}
 
 /** 把使用者輸入轉成安全的 Overpass 正規表示式（不分大小寫） */
 export function overpassNameRegex(text: string): string {

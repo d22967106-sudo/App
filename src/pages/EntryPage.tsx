@@ -6,7 +6,7 @@ import { categoriesFor, defaultCategory } from '../lib/categories'
 import { COUNTRY_NAME, CURRENCIES, currencyForCountry, currencyInfo, formatNumber, formatTwd, toTwd } from '../lib/currency'
 import { deleteEntry, getEntry, getMeta, newId, saveEntry, setMeta } from '../lib/db'
 import { getCurrentPosition } from '../lib/geo'
-import { nearbyShops, reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
+import { reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
 import { goBack, navigate } from '../lib/hooks'
 import {
   formatDateTimeShort,
@@ -65,14 +65,11 @@ export function EntryPage({ id, date }: Props) {
   const [photoIds, setPhotoIds] = useState<string[]>([])
   const [newPhotos, setNewPhotos] = useState<Photo[]>([])
   const [processing, setProcessing] = useState(0)
-  const [shops, setShops] = useState<NearbyShop[]>([])
   const [remembered, setRemembered] = useState<PlaceSuggestion[]>([])
   /** 從清單點選的店名（點選後不再拿來篩選） */
   const [pickedName, setPickedName] = useState<string | null>(null)
-  const [shopState, setShopState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   /** 打字搜尋的結果：query 是搜尋時的文字 */
   const [search, setSearch] = useState<SearchState | null>(null)
-  const [nearbyErrors, setNearbyErrors] = useState<string[]>([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -130,7 +127,6 @@ export function EntryPage({ id, date }: Props) {
       setLocState('done')
       setMeta('lastPos', { lat: pos.lat, lng: pos.lng })
       suggestPlaces(loc).then((r) => seq === locateSeq.current && setRemembered(r))
-      loadNearby(loc, seq)
       const geo = await reverseGeocode(loc)
       if (seq !== locateSeq.current || !geo) return
       setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode } : cur))
@@ -213,16 +209,6 @@ export function EntryPage({ id, date }: Props) {
     setLocation((cur) => ({ ...(cur ?? {}), lat: s.lat, lng: s.lng, accuracy: undefined }) as EntryLocation)
   }
 
-  function loadNearby(loc: EntryLocation, seq = locateSeq.current) {
-    setShopState('loading')
-    nearbyShops(loc).then((r) => {
-      if (seq !== locateSeq.current) return
-      setShops(r.shops)
-      setShopState(r.ok ? 'ok' : 'error')
-      setNearbyErrors(r.errors ?? [])
-    })
-  }
-
   async function runSearch() {
     const q = title.trim()
     if (!q || !location) return
@@ -244,11 +230,8 @@ export function EntryPage({ id, date }: Props) {
 
   const shopChips = useMemo(() => {
     const names = new Set(remembered.map((r) => r.place.name))
-    const base = searching ? searching.shops : shops
-    const list = base.filter((s) => !names.has(s.name))
-    const filtered = filterText && !searching ? list.filter((s) => s.name.toLowerCase().includes(filterText)) : list
-    return filtered.slice(0, 20)
-  }, [shops, remembered, filterText, searching])
+    return (searching?.shops ?? []).filter((s) => !names.has(s.name)).slice(0, 20)
+  }, [remembered, searching])
 
   // ── 照片 ──
   async function addPhotos(files: FileList | null) {
@@ -499,14 +482,8 @@ export function EntryPage({ id, date }: Props) {
         )}
         <ShopStatus
           hasLocation={locState === 'done' && !!location}
-          locating={locState === 'locating'}
-          nearbyState={shopState}
-          nearbyErrors={nearbyErrors}
-          nearbyCount={shops.length + remembered.length}
           filterText={filterText}
-          visibleCount={rememberedChips.length + shopChips.length}
           search={searching}
-          onRetryNearby={() => location && loadNearby(location)}
           onSearch={runSearch}
         />
       </div>
@@ -580,8 +557,6 @@ export function EntryPage({ id, date }: Props) {
               locateSeq.current++
               setLocation(null)
               setLocState('idle')
-              setShops([])
-              setShopState('idle')
               setSearch(null)
               setRemembered([])
             }}
@@ -643,25 +618,13 @@ function ErrorDetail({ errors }: { errors?: string[] }) {
 
 function ShopStatus({
   hasLocation,
-  locating,
-  nearbyState,
-  nearbyErrors,
-  nearbyCount,
   filterText,
-  visibleCount,
   search,
-  onRetryNearby,
   onSearch,
 }: {
   hasLocation: boolean
-  locating: boolean
-  nearbyState: 'idle' | 'loading' | 'ok' | 'error'
-  nearbyErrors: string[]
-  nearbyCount: number
   filterText: string
-  visibleCount: number
   search: SearchState | null
-  onRetryNearby: () => void
   onSearch: () => void
 }) {
   let content: React.ReactNode = null
@@ -685,47 +648,15 @@ function ShopStatus({
       )
     else if (!search.shops.length) content = <>附近 2 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
     else content = <>2 公里內符合「{search.query}」的店家</>
-  } else if (locating) {
-    content = '定位後會列出附近店家'
-  } else if (!hasLocation) {
-    content = '沒有地點，無法查附近店家；可以直接輸入店名'
-  } else if (nearbyState === 'loading') {
+  } else if (filterText && hasLocation) {
     content = (
       <>
-        <span className="spinner" />
-        查詢附近店家中…
-      </>
-    )
-  } else if (nearbyState === 'error') {
-    content = (
-      <>
-        附近店家查不到（網路或服務忙碌）
-        <button className="link-btn" onClick={onRetryNearby}>
-          重試
-        </button>
-        <ErrorDetail errors={nearbyErrors} />
-      </>
-    )
-  } else if (filterText && visibleCount === 0) {
-    content = (
-      <>
-        附近沒有符合的店家
+        想找店家？
         <button className="link-btn" onClick={onSearch}>
-          搜尋 2 公里內
+          搜尋附近 2 公里
         </button>
       </>
     )
-  } else if (filterText) {
-    content = (
-      <>
-        找不到想要的？
-        <button className="link-btn" onClick={onSearch}>
-          搜尋 2 公里內
-        </button>
-      </>
-    )
-  } else if (nearbyState === 'ok' && nearbyCount === 0) {
-    content = '附近 200 公尺內沒有登錄名字的店家，可以直接輸入店名再按搜尋'
   }
   if (!content) return null
   return (

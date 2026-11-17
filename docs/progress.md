@@ -22,7 +22,7 @@
   - 原本用的 CARTO 圖磚實測顯示「API key required」（現在要金鑰），已移除。
 - 店名搜尋看起來不能用 → ① 店名欄可打字篩選附近店家，按放大鏡或鍵盤「搜尋」查 2 公里內的店名 ② 顯示查詢中／查不到／失敗可重試的狀態 ③ Overpass 三台伺服器輪流（overpass-api.de → overpass.kumi.systems → overpass.private.coffee），每台 9 秒逾時 ④ 附近範圍 150 → 200 公尺。
 - 實測「搜尋失敗」（Overpass 用名字搜尋太慢／太忙）→ 打字搜尋改成依序：**Nominatim search**（限定附近 2 公里方框）→ **Photon**（photon.komoot.io）→ Overpass；逾時改用自己的 AbortController（不依賴 AbortSignal.any）。失敗時在狀態列用小字列出每個服務的失敗原因（例如「nominatim：HTTP 429」），方便截圖回報。
-- 「附近店家」自動列表仍用 Overpass（三台輪流，每台 12 秒）；如果實測也常失敗，再考慮換方法。
+- 使用者決定**不需要自動列出附近店家** → 已移除（新增紀錄時不再自動查 Overpass）。保留「記住去過的店」（手機本地資料，附近 300 公尺內記過的店）與打字搜尋。plan.md 第 8 節已更新。
 
 ### 程式結構
 
@@ -54,7 +54,7 @@
 - [x] 日期切換
 - [x] 新增紀錄（支出／收入／只寫日記、金額、分類、日記、時間）
 - [x] 自動定位＋地名
-- [x] 附近店家查詢＋記住去過的店
+- [x] 店名搜尋＋記住去過的店（自動列出附近店家已依使用者要求移除）
 - [x] 多幣別與匯率
 - [x] 照片選取與壓縮（暫存本地）
 - [x] 一天的完整回顧（每日總結＋時間軸）
@@ -88,7 +88,7 @@
 
 - 在這個開發環境連不到 OSM、Nominatim、Overpass、匯率 API，這些只用假資料測過，要在 iPhone 上確認真的能用。
 - iOS Safari 的 canvas 可能無法輸出 WebP，會自動改用 JPEG（計畫中的 WASM 編碼器還沒做，看實測檔案大小再決定）。
-- Nominatim／Overpass 是免費公共服務，有速率限制；查不到時店名可手動輸入。
+- Nominatim／Photon／Overpass 是免費公共服務，有速率限制；查不到時店名可手動輸入。
 - 圖磚暫存只會存「看過的區域」；「出國前預先下載旅遊地區」還沒做。
 - 向量地圖的實際外觀（OpenFreeMap 真實資料）在開發環境看不到，只驗證過背景色與上色邏輯，要在 iPhone 上確認。
 - MapLibre 讓 App 大了約 1 MB（第一次開啟下載，之後由 Service Worker 暫存）。
