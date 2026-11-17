@@ -282,17 +282,32 @@ export function startAutoSync(): void {
  * 拿不到（離線、沒登入）回傳 null，畫面會改顯示縮圖。
  */
 export async function getDisplayBlob(photo: Photo): Promise<Blob | null> {
-  if (photo.display) return photo.display
-  const cached = await cacheGet(photo.id)
-  if (cached) return cached
-  if (!photo.uploaded || !(await cloudReady()) || !(await getConfig())?.photoUrl) return null
+  return (await loadDisplay(photo)).blob
+}
+
+/** 同 getDisplayBlob，另外回傳拿不到的原因（看大圖時顯示） */
+export async function loadDisplay(photo: Photo): Promise<{ blob: Blob | null; error: string | null }> {
+  if (photo.display) return { blob: photo.display, error: null }
   try {
-    const blob = await downloadPhotoBlob(photo.id, 'display')
-    if (!blob) return null
+    const cached = await cacheGet(photo.id)
+    if (cached) return { blob: cached, error: null }
+  } catch {
+    /* 暫存讀不到就從雲端下載 */
+  }
+  if (!photo.uploaded) return { blob: null, error: '這張照片的大圖不在手機上，也還沒上傳到雲端' }
+  if (!(await cloudReady()) || !(await getConfig())?.photoUrl) return { blob: null, error: '沒有登入雲端，無法下載大圖' }
+  let blob: Blob | null
+  try {
+    blob = await downloadPhotoBlob(photo.id, 'display')
+  } catch (e) {
+    return { blob: null, error: `大圖下載失敗：${(e as Error).message}` }
+  }
+  if (!blob) return { blob: null, error: '雲端找不到這張照片的大圖' }
+  try {
     const { cacheLimitMB } = await getSettings()
     await cachePut(photo.id, blob, cacheLimitMB * 1024 * 1024)
-    return blob
   } catch {
-    return null
+    /* 存不進暫存也照樣顯示，下次再下載 */
   }
+  return { blob, error: null }
 }

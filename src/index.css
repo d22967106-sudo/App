@@ -1837,3 +1837,16 @@ button:disabled {
 .picker .leaflet-bottom {
   bottom: calc(var(--safe-bottom) + 130px);
 }
+
+.viewer-status {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom) + 64px);
+  text-align: center;
+  font-size: 13px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 8px 12px;
+  border-radius: 12px;
+}

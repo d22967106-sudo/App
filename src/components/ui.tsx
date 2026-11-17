@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { navigate, useRoute, usePhotoUrl } from '../lib/hooks'
+import { navigate, useRoute, usePhoto, usePhotoUrl } from '../lib/hooks'
 import { Icon, type IconName } from './Icon'
 
 // ── 提示訊息 ──
@@ -73,6 +73,20 @@ export function PhotoImg({ id, size = 'thumb', alt = '' }: { id: string; size?: 
   return url ? <img src={url} alt={alt} loading="lazy" decoding="async" /> : null
 }
 
+function ViewerImage({ id, alt }: { id: string; alt: string }) {
+  const { url, loading, error } = usePhoto(id, 'display')
+  return (
+    <>
+      {url && <img src={url} alt={alt} decoding="async" />}
+      {(loading || error) && (
+        <div className="viewer-status" role="status">
+          {loading ? '正在下載大圖…' : `${error}（目前顯示縮圖）`}
+        </div>
+      )}
+    </>
+  )
+}
+
 /** 全螢幕看大圖，可左右切換 */
 export function PhotoViewer({ ids, start, onClose }: { ids: string[]; start: number; onClose: () => void }) {
   const [i, setI] = useState(start)
@@ -87,7 +101,7 @@ export function PhotoViewer({ ids, start, onClose }: { ids: string[]; start: num
   }, [ids.length, onClose])
   return (
     <div className="viewer" role="dialog" aria-modal="true" aria-label="照片">
-      <PhotoImg id={ids[i]} size="display" alt={`照片 ${i + 1}`} />
+      <ViewerImage id={ids[i]} alt={`照片 ${i + 1}`} />
       <button className="round-btn close" aria-label="關閉" onClick={onClose}>
         <Icon name="close" />
       </button>
