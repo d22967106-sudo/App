@@ -23,7 +23,6 @@ export function MapPicker({ start, onCancel, onConfirm }: Props) {
   const [center, setCenter] = useState<GeoPoint>(start)
   const [dragging, setDragging] = useState(false)
   const [label, setLabel] = useState<string>('')
-  const tileFilter = useBaseLayer(mapRef)
 
   useEffect(() => {
     const map = L.map(elRef.current!, { zoomControl: false, attributionControl: true })
@@ -42,6 +41,9 @@ export function MapPicker({ start, onCancel, onConfirm }: Props) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 底圖：一定要放在「建立地圖」之後，effect 依宣告順序執行，地圖建好了才加得上去
+  const tileFilter = useBaseLayer(mapRef)
 
   // 停下來時查一下這裡的地址，讓使用者確認
   useEffect(() => {
