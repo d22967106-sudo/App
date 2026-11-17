@@ -7,6 +7,7 @@ const base = process.env.BASE_PATH ?? '/App/'
 
 export default defineConfig({
   base,
+  worker: { format: 'es' },
   define: {
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
   },
@@ -35,16 +36,37 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallback: 'index.html',
         cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             // 地圖圖磚：去過的區域暫存起來，離線也看得到
-            urlPattern: /^https:\/\/(tile\.openstreetmap\.org|[a-d]\.basemaps\.cartocdn\.com)\//,
+            urlPattern: /^https:\/\/tile\.openstreetmap\.org\//,
             handler: 'CacheFirst',
             options: {
               cacheName: 'osm-tiles',
               expiration: { maxEntries: 3000, maxAgeSeconds: 60 * 60 * 24 * 60, purgeOnQuotaError: true },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // OpenFreeMap 的樣式與資料索引：會更新，先試網路、離線用暫存
+            urlPattern: /^https:\/\/tiles\.openfreemap\.org\/(styles\/|planet$)/,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'ofm-styles',
+              networkTimeoutSeconds: 4,
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // OpenFreeMap 的向量圖磚、字型、圖示：網址含版本，不會變
+            urlPattern: /^https:\/\/tiles\.openfreemap\.org\//,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'ofm-tiles',
+              expiration: { maxEntries: 4000, maxAgeSeconds: 60 * 60 * 24 * 60, purgeOnQuotaError: true },
               cacheableResponse: { statuses: [0, 200] },
             },
           },

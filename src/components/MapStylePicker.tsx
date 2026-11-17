@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom'
-import { MAP_STYLES, previewTileUrl, setMapStyle, useMapStyle } from '../lib/mapStyles'
+import { MAP_STYLES, setMapStyle, useMapStyle } from '../lib/mapStyles'
 import { Icon } from './Icon'
 
 /** 地圖樣式選擇：每種樣式顯示一小塊台北的實際圖磚當預覽 */
@@ -16,7 +16,7 @@ export function MapStylePicker() {
           onClick={() => setMapStyle(s.id)}
         >
           <span className="style-preview">
-            <img src={previewTileUrl(s)} alt="" style={{ filter: s.filter }} loading="lazy" />
+            <img src={s.preview} alt="" style={{ filter: s.kind === 'raster' ? s.filter : undefined }} loading="lazy" />
             {current.id === s.id && (
               <span className="style-check">
                 <Icon name="check" size={16} strokeWidth={3} />

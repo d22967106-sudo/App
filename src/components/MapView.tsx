@@ -1,8 +1,13 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
-import { useMapStyle } from '../lib/mapStyles'
+import { maplibreGL } from '@maplibre/maplibre-gl-leaflet'
+import { setWorkerUrl } from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+import { FALLBACK_RASTER, useMapStyle, type MapStyle, type RasterStyle } from '../lib/mapStyles'
+import type { StyleSpec } from '../lib/vectorStyle'
 import type { GeoPoint } from '../lib/types'
 
 export interface MapMarker {
@@ -32,6 +37,9 @@ interface Props {
   className?: string
   ariaLabel: string
 }
+
+// MapLibre 的背景執行緒要另外打包，告訴它檔案在哪
+setWorkerUrl(maplibreWorkerUrl)
 
 const PRIMARY = '#A0612B'
 
@@ -121,19 +129,48 @@ export function MapView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 圖磚（換樣式時換掉）
+  // 底圖（換樣式時換掉）
+  const [tileFilter, setTileFilter] = useState('none')
   useEffect(() => {
     const map = mapRef.current
     if (!map) return
-    const layer = L.tileLayer(style.url, {
-      maxZoom: style.maxZoom,
-      subdomains: style.subdomains ?? 'abc',
-      attribution: style.attribution,
-      detectRetina: false,
-    }).addTo(map)
-    layer.bringToBack()
+    let layer: L.Layer | null = null
+    let cancelled = false
+
+    const addRaster = (r: RasterStyle) => {
+      setTileFilter(r.filter)
+      layer = L.tileLayer(r.url, {
+        maxZoom: r.maxZoom,
+        subdomains: r.subdomains ?? 'abc',
+        attribution: r.attribution,
+      }).addTo(map)
+      ;(layer as L.TileLayer).bringToBack()
+    }
+
+    const addStyle = async (st: MapStyle) => {
+      if (st.kind === 'raster') return addRaster(st)
+      setTileFilter('none')
+      try {
+        const spec = await loadVectorStyle(st.styleUrl)
+        if (cancelled) return
+        layer = maplibreGL({
+          style: st.transform(spec) as never,
+          attributionControl: false,
+          // 中日韓文字用手機內建字型，不用下載
+          localIdeographFontFamily: "'PingFang TC', 'Noto Sans TC', sans-serif",
+        })
+        layer.getAttribution = () => st.attribution
+        layer.addTo(map)
+      } catch {
+        // 第一次就離線、或服務暫時連不到：改用點陣地圖
+        if (!cancelled) addRaster(FALLBACK_RASTER)
+      }
+    }
+
+    addStyle(style)
     return () => {
-      layer.remove()
+      cancelled = true
+      layer?.remove()
     }
   }, [style])
 
@@ -222,9 +259,25 @@ export function MapView({
     <div
       ref={elRef}
       className={`map-fill map-tint ${className ?? ''}`}
-      style={{ '--tile-filter': style.filter } as React.CSSProperties}
+      style={{ '--tile-filter': tileFilter } as React.CSSProperties}
       role="region"
       aria-label={ariaLabel}
     />
   )
+}
+
+const styleCache = new Map<string, Promise<StyleSpec>>()
+
+/** 下載 OpenFreeMap 樣式 JSON（同一個網址只抓一次；離線時由 Service Worker 提供暫存） */
+function loadVectorStyle(url: string): Promise<StyleSpec> {
+  let p = styleCache.get(url)
+  if (!p) {
+    p = fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`style ${r.status}`)
+      return r.json() as Promise<StyleSpec>
+    })
+    p.catch(() => styleCache.delete(url))
+    styleCache.set(url, p)
+  }
+  return p
 }

@@ -14,14 +14,19 @@
 
 ### 實測回饋修正（第 1 輪）
 
-- 地圖顏色不好看 → 新增 4 種地圖樣式（都是 OSM 資料、免費免金鑰）：奶茶淡色（CARTO Positron＋暖色濾鏡，**預設**）、清爽彩色（CARTO Voyager）、OSM 原版、OSM 奶茶。地圖右側「樣式」按鈕或「統計」分頁可切換，選擇存在 IndexedDB（`src/lib/mapStyles.ts`）。
+- 地圖顏色不好看 → 新增 4 種地圖樣式（地圖右側「樣式」按鈕或「統計」分頁切換，選擇存在 IndexedDB，`src/lib/mapStyles.ts`）：
+  - **奶茶淡色（預設）**：OpenFreeMap 向量地圖（positron），由 `src/lib/vectorStyle.ts` 依圖層種類重新上色成焦糖奶茶配色，地名中文優先
+  - 清爽彩色：OpenFreeMap liberty，地名中文優先
+  - OSM 原版、OSM 奶茶（點陣圖磚）
+  - 向量地圖用 MapLibre GL（透過 @maplibre/maplibre-gl-leaflet 掛在 Leaflet 上，Leaflet 架構不變）；載入失敗時自動改用 OSM 奶茶。
+  - 原本用的 CARTO 圖磚實測顯示「API key required」（現在要金鑰），已移除。
 - 店名搜尋看起來不能用 → ① 店名欄可打字篩選附近店家，按放大鏡或鍵盤「搜尋」查 2 公里內的店名 ② 顯示查詢中／查不到／失敗可重試的狀態 ③ Overpass 三台伺服器輪流（overpass-api.de → overpass.kumi.systems → overpass.private.coffee），每台 9 秒逾時 ④ 附近範圍 150 → 200 公尺。
 
 ### 程式結構
 
 - `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
 - `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
-- 測試：`npm test`（單元測試 28 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
+- 測試：`npm test`（單元測試 30 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
 
 ### 第 1 階段的做法與決定
 
@@ -83,4 +88,6 @@
 - iOS Safari 的 canvas 可能無法輸出 WebP，會自動改用 JPEG（計畫中的 WASM 編碼器還沒做，看實測檔案大小再決定）。
 - Nominatim／Overpass 是免費公共服務，有速率限制；查不到時店名可手動輸入。
 - 圖磚暫存只會存「看過的區域」；「出國前預先下載旅遊地區」還沒做。
+- 向量地圖的實際外觀（OpenFreeMap 真實資料）在開發環境看不到，只驗證過背景色與上色邏輯，要在 iPhone 上確認。
+- MapLibre 讓 App 大了約 1 MB（第一次開啟下載，之後由 Service Worker 暫存）。
 - 金額欄輸入時不會自動加千分位逗號（顯示時有）。
