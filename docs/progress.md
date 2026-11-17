@@ -133,6 +133,8 @@
 
 ## 已知問題
 
+- iOS Safari 不能把「從 IndexedDB 讀出來的 Blob」或「網路下載的 Blob」直接再存回 IndexedDB（Error preparing Blob/File data to be stored in object store）。已改成：再存之前用 `freshBlob()` 複製成新 Blob；大圖暫存改存 ArrayBuffer。之後新增寫入照片的程式都要注意這點。
+
 - 第 2 階段只用假的 Supabase／Worker 測過，真實服務（寄信、RLS、R2）要等使用者設定後在 iPhone 上確認。
 - 匯入舊備份會把資料排進上傳佇列；如果雲端有比較新的版本，伺服器會保留新的，但手機上會留著匯入的舊版本（單一裝置使用時不會發生）。
 - 「下載這趟旅程的照片離線看」要等第 4 階段做旅程時一起做。

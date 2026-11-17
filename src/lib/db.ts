@@ -18,7 +18,9 @@ export interface OutboxItem {
 /** 大圖暫存（從雲端下載或剛上傳完的顯示版），超過上限刪最久沒看的 */
 export interface DisplayCacheItem {
   id: string
-  blob: Blob
+  /** 存 ArrayBuffer 而不是 Blob：iOS Safari 重複存取 Blob 會出錯 */
+  data: ArrayBuffer
+  type: string
   size: number
   lastAccess: number
 }
@@ -381,18 +383,13 @@ export async function applyRemote(table: SyncTable, rows: RemoteRow[]): Promise<
       continue
     }
     if (table === 'photos') {
+      // 手機上已經有這張照片就保留（不重新存圖檔，iOS 會出錯）；沒有才建立，縮圖之後下載
       const p = local as Photo | undefined
-      const merged: Photo = {
-        ...(row.data as unknown as Photo),
-        thumb: p?.thumb ?? null,
-        display: p?.display ?? null,
-        uploaded: true,
-      }
-      if (!p || !p.uploaded) {
-        await store.put(merged)
+      if (!p) {
+        await store.put({ ...(row.data as unknown as Photo), thumb: null, display: null, uploaded: true })
         changed++
-      }
-      if (!merged.thumb) needThumb.push(row.id)
+        needThumb.push(row.id)
+      } else if (!p.thumb) needThumb.push(row.id)
       continue
     }
     if (!local || row.updated_at > localVersion(table, local)) {
@@ -406,26 +403,30 @@ export async function applyRemote(table: SyncTable, rows: RemoteRow[]): Promise<
 }
 
 /** 照片上傳完成：標記已上傳，顯示版移到暫存（不再永久佔手機空間） */
+/**
+ * iOS Safari 不能把「從 IndexedDB 讀出來的 Blob」或「網路下載的 Blob」直接再存回去
+ * （會出現 Error preparing Blob/File data to be stored in object store），
+ * 所以要存之前先複製成一個全新的 Blob。複製要在交易外面做（交易裡不能等其他非同步工作）。
+ */
+export async function freshBlob(b: Blob): Promise<Blob> {
+  return new Blob([await b.arrayBuffer()], { type: b.type })
+}
+
 export async function markPhotoUploaded(id: string): Promise<Blob | null> {
   const db = await getDB()
-  const tx = db.transaction('photos', 'readwrite')
-  const p = await tx.store.get(id)
-  if (!p) {
-    await tx.done
-    return null
-  }
-  const display = p.display
-  await tx.store.put({ ...p, display: null, uploaded: true })
-  await tx.done
+  const p = await db.get('photos', id)
+  if (!p) return null
+  const thumb = p.thumb ? await freshBlob(p.thumb) : null
+  const display = p.display ? await freshBlob(p.display) : null
+  await db.put('photos', { ...p, thumb, display: null, uploaded: true })
   return display
 }
 
-export async function setPhotoThumb(id: string, thumb: Blob): Promise<void> {
+export async function setPhotoThumb(id: string, blob: Blob): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction('photos', 'readwrite')
-  const p = await tx.store.get(id)
-  if (p) await tx.store.put({ ...p, thumb })
-  await tx.done
+  const thumb = await freshBlob(blob)
+  const p = await db.get('photos', id)
+  if (p) await db.put('photos', { ...p, thumb, display: p.display ? await freshBlob(p.display) : null })
   if (p) {
     notify()
     for (const fn of thumbListeners) fn()
@@ -449,14 +450,15 @@ export async function photosMissingThumb(): Promise<string[]> {
 export async function cacheGet(id: string): Promise<Blob | undefined> {
   const db = await getDB()
   const it = await db.get('displayCache', id)
-  if (!it) return undefined
+  if (!it?.data) return undefined
   db.put('displayCache', { ...it, lastAccess: Date.now() }).catch(() => {})
-  return it.blob
+  return new Blob([it.data], { type: it.type })
 }
 
 export async function cachePut(id: string, blob: Blob, limitBytes: number): Promise<void> {
   const db = await getDB()
-  await db.put('displayCache', { id, blob, size: blob.size, lastAccess: Date.now() })
+  const data = await blob.arrayBuffer()
+  await db.put('displayCache', { id, data, type: blob.type, size: data.byteLength, lastAccess: Date.now() })
   await cacheTrim(limitBytes)
 }
 
