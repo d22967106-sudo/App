@@ -1,5 +1,5 @@
 # 照片伺服器的部署設定：讓 Cloudflare 直接從 GitHub 這個資料夾部署（不用在手機上貼程式碼）
-name = "ledger-photos1"
+name = "ledger-photos"
 main = "photos.js"
 compatibility_date = "2026-11-01"
 # SUPABASE_URL、SUPABASE_KEY 在 Cloudflare 後台設定，部署時保留

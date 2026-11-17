@@ -69,7 +69,7 @@ App 用**電子郵件＋自己設定的密碼**登入（Supabase 新的免費專
 1. 左邊選單 **Workers & Pages**（在 **Compute** 底下）→ **Create** → **Import a repository**（或 **Connect to Git**）。
 2. 第一次會要求連接 GitHub：按 **Connect GitHub**，授權後選 `d22967106-sudo/App`。
 3. 設定：
-   - Project name：`ledger-photos1`（要和 `worker/wrangler.toml` 的 name 一樣）
+   - Project name：`ledger-photos`（要和 `worker/wrangler.toml` 的 name 一樣）
    - Branch：`claude/start-phase-two-wqljng`
    - **Root directory**（在 Advanced／Build settings 裡）：`worker`
    - Build command：留空；Deploy command：`npx wrangler deploy`（預設值）
