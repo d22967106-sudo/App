@@ -25,7 +25,7 @@
 - **GitHub repo 的預設分支是 `claude/confident-babbage-8nlxkb`**，目前內容和 `claude/start-phase-two-wqljng` 相同（經使用者同意 fast-forward 合併過）。照片伺服器由 Cloudflare 從預設分支的 `worker/` 自動部署，所以**改 `worker/` 時要同步推到預設分支**（推到工作分支以外的分支前要先問使用者）。
 - 照片伺服器：Cloudflare Worker `ledger-photos`，網址 https://ledger-photos.d22967106.workers.dev（`/health` 顯示 ok 表示設定正確）。Cloudflare Build 設定：Root directory＝`worker`，Build command＝`echo ok`，Deploy command＝`npx wrangler deploy`。R2 bucket `ledger-photos`。
 - Supabase 專案網址 https://ouyvyqcfesoguhkjebsj.supabase.co，publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（公開值）；App 裡的雲端設定由使用者自己貼上。Confirm email 已關閉。
-- 提醒使用者：Supabase 的 **Allow new users to sign up** 要關閉（第 2 階段最後有提醒，沒確認過有沒有關，第 3 階段開始時順便問一次）。
+- Supabase 的 **Allow new users to sign up** 已關閉（使用者 2026-11-17 確認）。
 - 開發環境連不到 workers.dev、github.io、supabase.co（代理擋掉），只能靠使用者回報或 GitHub Actions 的結果確認。
 - 第 3 階段開始前要知道：背景定位 App（Overland／OwnTracks）要能把軌跡送進 Supabase 的 `track_points` 表（格式見下面「資料表」）；可能需要一個接收端（Supabase Edge Function 或在現有 Worker 加路由）把它們的格式轉成 `{id, updated_at, deleted, data}`。Scriptable 小工具可用 `entries` 的 `date` 欄位查當天資料。**動手前先查這些 App 目前的最新版本與設定方式**。
 
