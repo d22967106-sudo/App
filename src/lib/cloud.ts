@@ -2,7 +2,7 @@ import { getMeta, setMeta } from './db'
 
 /**
  * 雲端設定與登入（Supabase）。
- * 不用 supabase-js，只用到幾個 REST 端點：寄驗證碼、驗證、換新 token、讀寫資料表。
+ * 不用 supabase-js，只用到幾個 REST 端點：建立帳號、密碼登入、換新 token、讀寫資料表。
  * Supabase 的 anon／publishable key 是公開的，安全靠資料表的 RLS；
  * 照片伺服器（Cloudflare Worker）網址也是公開的，上傳下載都要帶登入 token。
  */

@@ -107,7 +107,7 @@
 
 ## 第 2 階段：雲端
 
-- [x] Supabase 資料表、RLS（`supabase/schema.sql`）、電子郵件驗證碼登入
+- [x] Supabase 資料表、RLS（`supabase/schema.sql`）、電子郵件＋密碼登入
 - [x] 同步與離線佇列
 - [x] R2 照片上傳（`worker/photos.js`，Worker＋R2 綁定）、縮圖／顯示版、大圖暫存
 - [x] 設定教學 `docs/setup-cloud.md`
