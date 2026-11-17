@@ -4,7 +4,7 @@
 
 ## 目前狀態
 
-**第 2 階段程式完成，使用者已設定好 Supabase 與 Cloudflare，iPhone 上同步與照片上傳到 R2 已確認可用（2026-11-17）。剩下：關閉註冊、實測大圖下載／離線補傳，回饋後修正。**
+**第 2 階段程式完成，使用者已設定好 Supabase 與 Cloudflare，iPhone 上同步與照片上傳到 R2 已確認可用（2026-11-17）。離線補傳、刪除同步已實測 OK。待查：清除暫存後重新下載的大圖看起來像素變低（已在看大圖時加上下載狀態／失敗原因的提示，等使用者回報畫面上的文字與 R2 裡 display 檔大小）。**
 
 - 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages，第 2 階段已上線）。
 - Supabase 網址與 publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（使用者提供，公開值），Cloudflare 後台不用再設變數。
