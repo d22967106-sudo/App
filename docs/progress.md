@@ -8,8 +8,7 @@
 
 - 程式在分支 `claude/confident-babbage-8nlxkb`（React + TypeScript + Vite，Leaflet、idb、fflate、vite-plugin-pwa）。
 - 發布：`.github/workflows/deploy.yml` 會在 push 時 build 並發布到 GitHub Pages。
-  使用者要先做：① repo 改公開（免費方案 Pages 需要公開 repo）② Settings › Pages › Source 選「GitHub Actions」。
-  網址會是 https://d22967106-sudo.github.io/App/
+  已上線（repo 已公開、Pages Source 已設為 GitHub Actions）：https://d22967106-sudo.github.io/App/
 - 下一步：使用者實測回饋 → 修正 → 進第 2 階段（雲端）。
 
 ### 程式結構
