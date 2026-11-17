@@ -7,12 +7,12 @@
 **第 2 階段程式完成（2026-11-17），等使用者註冊 Supabase／Cloudflare 並照 `docs/setup-cloud.md` 設定後在 iPhone 實測。**
 
 - 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages，第 2 階段已上線）。
-- 使用者要做的事：照 `docs/setup-cloud.md` 建 Supabase 專案、執行 `supabase/schema.sql`、改登入信範本（顯示 `{{ .Token }}`）、建 R2 bucket 與 Worker（`worker/photos.js`），然後在 App「統計 → 雲端同步」貼上網址與公開金鑰並登入。
+- 使用者要做的事：照 `docs/setup-cloud.md` 建 Supabase 專案、執行 `supabase/schema.sql`（已完成）、關閉 Confirm email、建 R2 bucket 與 Worker（`worker/photos.js`），然後在 App「統計 → 雲端同步」貼上網址與公開金鑰並登入。
 - 待確認：Cloudflare 開通 R2 是否要求綁信用卡（網路資料說法不一）。如果要，而使用者不想綁，替代方案是 Supabase Storage（免費 1 GB），需要和使用者討論。
 
 ### 第 2 階段的做法
 
-- **登入**：Supabase 電子郵件＋數字驗證碼（不用 magic link：加入主畫面的 App 和 Safari 儲存空間分開，點連結會登入到 Safari）。不用 supabase-js，自己呼叫 REST（`src/lib/cloud.ts`），session 存在 IndexedDB meta（`cloud.session`），快過期自動 refresh，refresh 失敗就要求重新登入。
+- **登入**：Supabase **電子郵件＋密碼**（建立帳號／登入兩個按鈕；Supabase 要關閉 Confirm email）。原本做的是信箱數字驗證碼，但 Supabase 從 2026 年 6 月起新的免費專案**不能改登入信範本**（要先設定自訂 SMTP），預設信裡只有連結，連結又會開到 Safari 而不是主畫面 App（儲存空間分開），所以改成密碼。不用 supabase-js，自己呼叫 REST（`src/lib/cloud.ts`），session 存在 IndexedDB meta（`cloud.session`），快過期自動 refresh，refresh 失敗就要求重新登入。
 - **雲端設定**（Supabase 網址、公開金鑰、照片伺服器網址）在 App 裡輸入，存在 meta（`cloud.config`），沒有寫死在程式裡。
 - **資料表**（`supabase/schema.sql`）：entries、summaries、track_points、places、photos 五張表格式相同：`user_id, id, updated_at(毫秒), deleted, data(jsonb＝App 的整筆資料), server_updated_at`；主鍵 (user_id, id)；RLS 只能讀寫自己的；trigger 設 server_updated_at，且「比較舊的 updated_at 不會蓋掉比較新的」。entries／track_points 另有由 data 產生的 `date` 欄位，給第 3 階段小工具查詢用。每日總結的 id＝日期。
 - **同步**（`src/lib/sync.ts`）：
@@ -22,7 +22,7 @@
   - 觸發時機：App 開啟、本地修改後 3 秒、回到前景、恢復網路、開著時每 5 分鐘；設定頁有「立即同步」。
 - **照片**：上傳時先把縮圖、顯示版傳到 Worker，成功後才寫 photos 資料表，並把手機上的顯示版移到「大圖暫存」（不再永久佔空間）。其他裝置同步下來只有照片資料，縮圖會自動下載存在手機；大圖點開才下載並放暫存。暫存上限預設 200 MB（可選 100 MB～2 GB），超過刪最久沒看的；可手動清除。「暫停照片上傳」開關（iOS 偵測不到 Wi-Fi）。
 - **備份匯出**仍是 ledger-diary-backup v1：縮圖＋手機上有的大圖（含暫存）；登入後可勾「包含雲端上的大圖」逐張下載放進 zip。照片資訊多了 `uploaded`，thumbFile 可能是 null。
-- **測試**：`src/lib/sync.test.ts` 用假的 Supabase＋照片伺服器測 8 項（舊資料升級排隊、登入錯誤訊息、上傳＋另一台裝置下載、刪除同步、衝突處理、暫停照片上傳、token 換新／過期、暫存上限）。全部單元測試 67 項。設定頁用 Playwright 模擬 iPhone 13 走過設定→寄驗證碼→登入→同步流程。
+- **測試**：`src/lib/sync.test.ts` 用假的 Supabase＋照片伺服器測 8 項（舊資料升級排隊、登入／建立帳號錯誤訊息、上傳＋另一台裝置下載、刪除同步、衝突處理、暫停照片上傳、token 換新／過期、暫存上限）。全部單元測試 67 項。設定頁用 Playwright 模擬 iPhone 13 走過設定→建立帳號→同步流程。
 
 ### 第 1 階段（已完成，使用者已在 iPhone 實測確認）
 

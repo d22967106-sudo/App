@@ -10,10 +10,10 @@ import {
   onCloudChange,
   saveConfig,
   saveSettings,
-  sendLoginCode,
+  signInWithPassword,
   signOut,
+  signUpWithPassword,
   validateConfig,
-  verifyLoginCode,
   type CloudConfig,
   type CloudSession,
   type CloudSettings,
@@ -123,75 +123,62 @@ function ConfigForm({ initial, onDone, canCancel }: { initial: CloudConfig | nul
 
 function LoginForm({ onEditConfig }: { onEditConfig: () => void }) {
   const [email, setEmail] = useState('')
-  const [code, setCode] = useState('')
-  const [sent, setSent] = useState(false)
-  const [busy, setBusy] = useState(false)
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState<'in' | 'up' | null>(null)
   const [error, setError] = useState('')
+  const [info, setInfo] = useState('')
 
-  const send = async () => {
+  const run = async (mode: 'in' | 'up') => {
     if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError('請輸入正確的電子郵件')
-    setBusy(true)
+    if (!password) return setError('請輸入密碼')
+    setBusy(mode)
     setError('')
+    setInfo('')
     try {
-      await sendLoginCode(email)
-      setSent(true)
-      toast('驗證碼已寄出，請到信箱查看')
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const verify = async () => {
-    if (!/^\d{6,10}$/.test(code.replace(/\s/g, ''))) return setError('請輸入信裡的數字驗證碼')
-    setBusy(true)
-    setError('')
-    try {
-      await verifyLoginCode(email, code)
+      if (mode === 'in') {
+        await signInWithPassword(email, password)
+      } else {
+        const s = await signUpWithPassword(email, password)
+        if (!s) {
+          setInfo('帳號已建立，但 Supabase 要求先確認信箱：請到 Supabase 關閉「Confirm email」（見設定教學 A3），或點確認信裡的連結，然後回來按「登入」。')
+          return
+        }
+      }
       toast('登入成功，開始同步')
       syncNow()
     } catch (e) {
       setError((e as Error).message)
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
   return (
     <>
       <p className="muted" style={{ fontSize: 14, margin: 0 }}>
-        用電子郵件登入：App 會寄一組數字驗證碼到信箱，複製回來貼上就好（不用密碼）。
+        第一次使用：填電子郵件和自己設定的密碼（至少 8 個字），按「建立帳號」。之後換手機或重新安裝，用同一組登入就好。
       </p>
       <div className="field">
         <label htmlFor="cl-email">電子郵件</label>
-        <input id="cl-email" className="text-input" type="email" autoComplete="email" autoCapitalize="off"
-          value={email} onChange={(e) => setEmail(e.target.value)} disabled={sent && busy} />
+        <input id="cl-email" className="text-input" type="email" autoComplete="username" autoCapitalize="off"
+          value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
-      {sent && (
-        <div className="field">
-          <label htmlFor="cl-code">驗證碼</label>
-          <input id="cl-code" className="text-input" inputMode="numeric" autoComplete="one-time-code"
-            placeholder="123456" value={code} onChange={(e) => setCode(e.target.value)} />
-        </div>
-      )}
+      <div className="field">
+        <label htmlFor="cl-pass">密碼</label>
+        <input id="cl-pass" className="text-input" type="password" autoComplete="current-password"
+          value={password} onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && run('in')} />
+      </div>
       {error && <p className="error-text" role="alert">{error}</p>}
-      {sent ? (
-        <>
-          <button className="btn-primary" onClick={verify} disabled={busy}>
-            {busy ? <span className="spinner" /> : null}
-            登入
-          </button>
-          <button className="btn-text" onClick={send} disabled={busy}>
-            重新寄驗證碼
-          </button>
-        </>
-      ) : (
-        <button className="btn-primary" onClick={send} disabled={busy}>
-          {busy ? <span className="spinner" /> : null}
-          寄驗證碼
-        </button>
-      )}
+      {info && <p className="hint" role="status">{info}</p>}
+      <button className="btn-primary" onClick={() => run('in')} disabled={busy != null}>
+        {busy === 'in' ? <span className="spinner" /> : null}
+        登入
+      </button>
+      <button className="btn-outline" onClick={() => run('up')} disabled={busy != null}>
+        {busy === 'up' ? <span className="spinner" /> : null}
+        建立帳號（第一次使用）
+      </button>
       <button className="btn-text" onClick={onEditConfig}>
         修改雲端設定
       </button>

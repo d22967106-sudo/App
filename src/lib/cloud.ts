@@ -128,17 +128,6 @@ async function authFetch(cfg: CloudConfig, path: string, body: unknown): Promise
   }
 }
 
-/** 寄 6 位數驗證碼到信箱（第一次會自動建立帳號） */
-export async function sendLoginCode(email: string): Promise<void> {
-  const cfg = await requireConfig()
-  const res = await authFetch(cfg, 'otp', { email: email.trim(), create_user: true })
-  if (res.ok) return
-  const msg = await readError(res)
-  if (res.status === 429) throw new CloudError('寄信太頻繁了，請過一陣子再試（Supabase 免費版每小時只能寄幾封）', 429)
-  if (/signups? not allowed/i.test(msg)) throw new CloudError('這個信箱沒有帳號，而且已關閉註冊', res.status)
-  throw new CloudError(`寄送失敗：${msg}`, res.status)
-}
-
 interface TokenResponse {
   access_token: string
   refresh_token: string
@@ -157,16 +146,45 @@ function toSession(t: TokenResponse, email?: string): CloudSession {
   }
 }
 
-export async function verifyLoginCode(email: string, code: string): Promise<CloudSession> {
+/**
+ * 登入方式：電子郵件＋密碼。
+ * （原本想用信箱驗證碼，但 Supabase 新的免費專案不能改登入信範本，信裡不會有數字驗證碼；
+ *   信裡的連結又會開到 Safari 而不是主畫面 App，所以改用密碼。）
+ */
+export async function signInWithPassword(email: string, password: string): Promise<CloudSession> {
   const cfg = await requireConfig()
-  const res = await authFetch(cfg, 'verify', { type: 'email', email: email.trim(), token: code.replace(/\s/g, '') })
+  const res = await authFetch(cfg, 'token?grant_type=password', { email: email.trim(), password })
   if (!res.ok) {
     const msg = await readError(res)
-    if (res.status === 401 || res.status === 403 || /expired|invalid/i.test(msg))
-      throw new CloudError('驗證碼錯誤或已過期，請重新寄一次', res.status)
+    if (/email not confirmed/i.test(msg))
+      throw new CloudError('這個帳號還沒完成信箱確認：請到 Supabase 關閉「Confirm email」，或點確認信裡的連結後再登入', res.status)
+    if (res.status === 400 || /invalid login credentials/i.test(msg))
+      throw new CloudError('電子郵件或密碼不對（第一次使用請按「建立帳號」）', res.status)
+    if (res.status === 429) throw new CloudError('嘗試太多次了，請過一陣子再試', 429)
     throw new CloudError(`登入失敗：${msg}`, res.status)
   }
   const s = toSession((await res.json()) as TokenResponse, email)
+  await saveSession(s)
+  return s
+}
+
+/** 第一次使用：建立帳號。Supabase 有關閉「Confirm email」的話會直接登入 */
+export async function signUpWithPassword(email: string, password: string): Promise<CloudSession | null> {
+  const cfg = await requireConfig()
+  if (password.length < 8) throw new CloudError('密碼至少要 8 個字')
+  const res = await authFetch(cfg, 'signup', { email: email.trim(), password })
+  if (!res.ok) {
+    const msg = await readError(res)
+    if (/already registered|already exists/i.test(msg)) throw new CloudError('這個信箱已經有帳號了，請直接登入', res.status)
+    if (/signups? not allowed/i.test(msg)) throw new CloudError('已關閉註冊，請直接登入', res.status)
+    if (/password/i.test(msg)) throw new CloudError(`密碼不符合要求：${msg}`, res.status)
+    if (res.status === 429) throw new CloudError('嘗試太多次了，請過一陣子再試', 429)
+    throw new CloudError(`建立帳號失敗：${msg}`, res.status)
+  }
+  const body = (await res.json()) as Partial<TokenResponse>
+  // 需要信箱確認時不會回傳 token
+  if (!body.access_token) return null
+  const s = toSession(body as TokenResponse, email)
   await saveSession(s)
   return s
 }

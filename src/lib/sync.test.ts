@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { openDB } from 'idb'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { getSession, saveConfig, saveSettings, sendLoginCode, verifyLoginCode } from './cloud'
+import { getSession, saveConfig, saveSettings, signInWithPassword, signUpWithPassword } from './cloud'
 import * as db from './db'
 import { getDisplayBlob, getSyncStatus, syncNow } from './sync'
 import type { Entry, Photo } from './types'
@@ -16,6 +16,7 @@ class FakeCloud {
   expiresIn = 3600
   calls: string[] = []
   seq = 0
+  users = new Map<string, string>([['me@x.tw', 'secret123']])
 
   issue(user: string) {
     const a = `at${++this.seq}`
@@ -40,8 +41,15 @@ class FakeCloud {
     if (url.host === 'proj.supabase.co' && url.pathname.startsWith('/auth/v1/')) {
       const body = init.body ? JSON.parse(String(init.body)) : {}
       const path = url.pathname.slice(9)
-      if (path === 'otp') return json({})
-      if (path === 'verify') return body.token === '123456' ? json(this.issue(body.email.split('@')[0])) : json({ msg: 'Token has expired or is invalid' }, 403)
+      if (path === 'signup') {
+        if (this.users.has(body.email)) return json({ msg: 'User already registered' }, 422)
+        this.users.set(body.email, body.password)
+        return json(this.issue(body.email.split('@')[0]))
+      }
+      if (path === 'token' && url.searchParams.get('grant_type') === 'password') {
+        if (this.users.get(body.email) !== body.password) return json({ error_description: 'Invalid login credentials' }, 400)
+        return json(this.issue(body.email.split('@')[0]))
+      }
       if (path === 'token') {
         const u = this.refreshTokens.get(body.refresh_token)
         if (!u) return json({ msg: 'Invalid Refresh Token' }, 400)
@@ -106,8 +114,7 @@ async function freshDevice() {
 
 async function login(user = 'me') {
   await saveConfig({ url: 'https://proj.supabase.co', key: 'sb_publishable_0123456789abcdef', photoUrl: 'https://photos.example.dev' })
-  await sendLoginCode(`${user}@x.tw`)
-  await verifyLoginCode(`${user}@x.tw`, '123456')
+  await signInWithPassword(`${user}@x.tw`, 'secret123')
 }
 
 function entry(id: string, p: Partial<Entry> = {}): Entry {
@@ -152,10 +159,13 @@ describe('雲端同步', () => {
     expect(keys).toEqual(['entries:old1', 'summaries:2025-11-13'])
   })
 
-  it('登入失敗會顯示中文訊息', async () => {
+  it('登入／建立帳號失敗會顯示中文訊息', async () => {
     await saveConfig({ url: 'https://proj.supabase.co', key: 'sb_publishable_0123456789abcdef', photoUrl: '' })
-    await expect(verifyLoginCode('me@x.tw', '000000')).rejects.toThrow('驗證碼錯誤或已過期')
+    await expect(signInWithPassword('me@x.tw', 'wrong')).rejects.toThrow('電子郵件或密碼不對')
     expect(await getSession()).toBeNull()
+    await expect(signUpWithPassword('me@x.tw', 'secret123')).rejects.toThrow('已經有帳號')
+    await expect(signUpWithPassword('new@x.tw', 'short')).rejects.toThrow('至少要 8 個字')
+    expect(await signUpWithPassword('new@x.tw', 'longenough')).toMatchObject({ userId: 'new' })
   })
 
   it('上傳紀錄與照片，大圖移到暫存；另一台裝置拉得下來', async () => {
