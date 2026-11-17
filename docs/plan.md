@@ -62,6 +62,7 @@ Overland/OwnTracks ────────→ （紀錄、軌跡、步數）  �
 - **手機為主、雲端同步**：資料先存手機（IndexedDB），沒網路也能用，有網路再同步。
 - **Supabase**：資料庫＋登入；用 RLS 確保只有本人讀寫；也是捷徑、背景定位 App、Scriptable 的收件匣／資料來源；同時是備份。
 - **Cloudflare R2**：存照片（免費 10 GB、下載不收流量費）。上傳需要一個小型伺服器端程式（Supabase Edge Function 或 Cloudflare Worker）代簽上傳網址，R2 金鑰不能放在 PWA 裡。
+  - 第 2 階段實作：用 **Cloudflare Worker＋R2 綁定**直接收發照片（不用簽網址，也完全不需要 R2 金鑰）；Worker 向 Supabase 確認登入 token，照片存在 `<使用者 id>/<照片 id>/thumb|display`，只能存取自己的。
 - **地圖**：Leaflet＋OpenStreetMap 圖磚。去過的區域暫存；出國前可預先下載旅遊地區。
 - 軌跡點之間預設畫直線，可選擇用免費路線服務推算道路（標示為推測）。
 
@@ -94,6 +95,7 @@ Overland/OwnTracks ────────→ （紀錄、軌跡、步數）  �
 - 大圖點開時才下載並暫存，暫存上限 200 MB（可調），超過刪最久沒看的。可「下載這趟旅程的照片」離線看。
 - 原圖不上傳，留在 iPhone 相簿；App 記下拍攝時間方便找回。
 - 出國時可設定「照片只在 Wi-Fi 上傳」。
+  - 第 2 階段實作：iOS 的網頁 App 偵測不到目前是不是 Wi-Fi（Safari 不支援 Network Information API），改成手動開關「暫停照片上傳」。
 
 ## 8. 店名
 

@@ -7,7 +7,7 @@ import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
 import { buildRoute, buildTimeline, dayStats, type RoutePoint } from '../lib/day'
-import { getEntriesByDate, getMeta, getPhoto, getTrackByDate, setMeta } from '../lib/db'
+import { getEntriesByDate, getMeta, getPhoto, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
 import { entrySubtitle, entryTitle, shortAmount } from '../lib/display'
 import { getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
@@ -19,7 +19,10 @@ const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
 /** 每筆紀錄第一張照片的縮圖網址，給地圖用 */
 function useThumbUrls(entries: Entry[] | undefined): Record<string, string> {
   const [urls, setUrls] = useState<Record<string, string>>({})
-  const key = entries?.map((e) => `${e.id}:${e.photoIds[0] ?? ''}`).join(',') ?? ''
+  // 從雲端同步下來的縮圖下載完時要重新讀
+  const [thumbTick, setThumbTick] = useState(0)
+  useEffect(() => onPhotoThumb(() => setThumbTick((t) => t + 1)), [])
+  const key = (entries?.map((e) => `${e.id}:${e.photoIds[0] ?? ''}`).join(',') ?? '') + `#${thumbTick}`
   useEffect(() => {
     let alive = true
     const made: string[] = []
@@ -28,7 +31,7 @@ function useThumbUrls(entries: Entry[] | undefined): Record<string, string> {
       for (const e of entries ?? []) {
         if (!e.location || !e.photoIds[0]) continue
         const p = await getPhoto(e.photoIds[0])
-        if (!p) continue
+        if (!p?.thumb) continue
         const u = URL.createObjectURL(p.thumb)
         made.push(u)
         out[e.id] = u

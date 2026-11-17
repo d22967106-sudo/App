@@ -912,6 +912,7 @@ function ShopStatus({
 function FreshThumb({ photo }: { photo: Photo }) {
   const [url, setUrl] = useState<string>()
   useEffect(() => {
+    if (!photo.thumb) return
     const u = URL.createObjectURL(photo.thumb)
     setUrl(u)
     return () => URL.revokeObjectURL(u)

@@ -1,17 +1,30 @@
 # 進度
 
-最後更新：2026-11-17（第 1 階段完成，使用者已在 iPhone 實測確認）
+最後更新：2026-11-17（第 2 階段程式完成，等使用者設定雲端帳號後實測）
 
 ## 目前狀態
 
-**第 1 階段完成（使用者已在 iPhone 實測並確認）。下一步：第 2 階段「雲端」，依規劃開一個新的工作階段來做。**
+**第 2 階段程式完成（2026-11-17），等使用者註冊 Supabase／Cloudflare 並照 `docs/setup-cloud.md` 設定後在 iPhone 實測。**
 
-開始第 2 階段前要知道的事：
-- 工作分支 `claude/confident-babbage-8nlxkb`（也是目前 GitHub Pages 發布的分支）。
-- 第 2 階段需要使用者自己註冊 Supabase、Cloudflare（R2）帳號，不經手密碼；Supabase anon key 可以放進程式（安全靠 RLS），R2 金鑰不能放在 PWA，要用 Edge Function／Worker 代簽上傳網址。
-- 資料模型在 `src/lib/types.ts`，IndexedDB 在 `src/lib/db.ts`（版本 1；改 schema 要升版並寫 upgrade）。照片目前縮圖與顯示版都存在手機上，第 2 階段上傳顯示版後要刪本地副本（plan.md 第 7 節）。
-- 匯出格式 `src/lib/backup.ts`（ledger-diary-backup v1），雲端同步後仍要保留。
-- 瀏覽器端對端測試腳本沒放進 repo（在開發環境的暫存資料夾），新工作階段需要時可以照本文件的功能清單重寫。
+- 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，push 就會發布到 GitHub Pages；如果 Pages 環境限制分支導致發布失敗，要到 repo Settings → Environments → github-pages 加入這個分支）。
+- 使用者要做的事：照 `docs/setup-cloud.md` 建 Supabase 專案、執行 `supabase/schema.sql`、改登入信範本（顯示 `{{ .Token }}`）、建 R2 bucket 與 Worker（`worker/photos.js`），然後在 App「統計 → 雲端同步」貼上網址與公開金鑰並登入。
+- 待確認：Cloudflare 開通 R2 是否要求綁信用卡（網路資料說法不一）。如果要，而使用者不想綁，替代方案是 Supabase Storage（免費 1 GB），需要和使用者討論。
+
+### 第 2 階段的做法
+
+- **登入**：Supabase 電子郵件＋數字驗證碼（不用 magic link：加入主畫面的 App 和 Safari 儲存空間分開，點連結會登入到 Safari）。不用 supabase-js，自己呼叫 REST（`src/lib/cloud.ts`），session 存在 IndexedDB meta（`cloud.session`），快過期自動 refresh，refresh 失敗就要求重新登入。
+- **雲端設定**（Supabase 網址、公開金鑰、照片伺服器網址）在 App 裡輸入，存在 meta（`cloud.config`），沒有寫死在程式裡。
+- **資料表**（`supabase/schema.sql`）：entries、summaries、track_points、places、photos 五張表格式相同：`user_id, id, updated_at(毫秒), deleted, data(jsonb＝App 的整筆資料), server_updated_at`；主鍵 (user_id, id)；RLS 只能讀寫自己的；trigger 設 server_updated_at，且「比較舊的 updated_at 不會蓋掉比較新的」。entries／track_points 另有由 data 產生的 `date` 欄位，給第 3 階段小工具查詢用。每日總結的 id＝日期。
+- **同步**（`src/lib/sync.ts`）：
+  - IndexedDB 升到第 2 版：新增 `outbox`（待上傳佇列，只記「哪張表哪一筆改過」）與 `displayCache`（大圖暫存）。升版時把第 1 階段的舊資料全部排進佇列。
+  - 所有本地寫入（saveEntry、deleteEntry、saveSummary、track、putPlace、restoreAll）在同一個交易裡排進佇列。上傳時讀最新內容 upsert；本地已不存在就送 `deleted=true`。
+  - 下載：每張表記住上次的 `server_updated_at`（meta `sync.cursor.<user>.<table>`），只拉之後改過的。本地還有沒上傳的修改就保留本地；雲端標成刪除就刪；否則雲端 updated_at 比較新才覆蓋。
+  - 觸發時機：App 開啟、本地修改後 3 秒、回到前景、恢復網路、開著時每 5 分鐘；設定頁有「立即同步」。
+- **照片**：上傳時先把縮圖、顯示版傳到 Worker，成功後才寫 photos 資料表，並把手機上的顯示版移到「大圖暫存」（不再永久佔空間）。其他裝置同步下來只有照片資料，縮圖會自動下載存在手機；大圖點開才下載並放暫存。暫存上限預設 200 MB（可選 100 MB～2 GB），超過刪最久沒看的；可手動清除。「暫停照片上傳」開關（iOS 偵測不到 Wi-Fi）。
+- **備份匯出**仍是 ledger-diary-backup v1：縮圖＋手機上有的大圖（含暫存）；登入後可勾「包含雲端上的大圖」逐張下載放進 zip。照片資訊多了 `uploaded`，thumbFile 可能是 null。
+- **測試**：`src/lib/sync.test.ts` 用假的 Supabase＋照片伺服器測 8 項（舊資料升級排隊、登入錯誤訊息、上傳＋另一台裝置下載、刪除同步、衝突處理、暫停照片上傳、token 換新／過期、暫存上限）。全部單元測試 67 項。設定頁用 Playwright 模擬 iPhone 13 走過設定→寄驗證碼→登入→同步流程。
+
+### 第 1 階段（已完成，使用者已在 iPhone 實測確認）
 
 - 程式在分支 `claude/confident-babbage-8nlxkb`（React + TypeScript + Vite，Leaflet、idb、fflate、vite-plugin-pwa）。
 - 注意：從 Safari 網址列開是網頁介面；「加入主畫面」後從圖示開才是全螢幕。
@@ -55,6 +68,7 @@
 ### 程式結構
 
 - `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
+- 第 2 階段新增：`src/lib/cloud.ts`（雲端設定、登入、Supabase REST、照片伺服器）、`src/lib/sync.ts`（同步與大圖暫存）、`src/pages/CloudSection.tsx`（設定頁的雲端同步區塊）、`supabase/schema.sql`、`worker/photos.js`、`docs/setup-cloud.md`
 - `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
 - 測試：`npm test`（單元測試 39 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
 
@@ -93,9 +107,12 @@
 
 ## 第 2 階段：雲端
 
-- [ ] Supabase 專案、資料表、RLS、登入
-- [ ] 同步與離線佇列
-- [ ] R2 照片上傳（代簽程式）、縮圖／顯示版、大圖暫存
+- [x] Supabase 資料表、RLS（`supabase/schema.sql`）、電子郵件驗證碼登入
+- [x] 同步與離線佇列
+- [x] R2 照片上傳（`worker/photos.js`，Worker＋R2 綁定）、縮圖／顯示版、大圖暫存
+- [x] 設定教學 `docs/setup-cloud.md`
+- [ ] 使用者註冊 Supabase／Cloudflare 並設定
+- [ ] 使用者在 iPhone 上實測（登入、同步、照片上傳與大圖下載、離線後補傳）
 
 ## 第 3 階段：自動化
 
@@ -113,6 +130,11 @@
 - [ ] 使用狀況頁
 
 ## 已知問題
+
+- 第 2 階段只用假的 Supabase／Worker 測過，真實服務（寄信、RLS、R2）要等使用者設定後在 iPhone 上確認。
+- 匯入舊備份會把資料排進上傳佇列；如果雲端有比較新的版本，伺服器會保留新的，但手機上會留著匯入的舊版本（單一裝置使用時不會發生）。
+- 「下載這趟旅程的照片離線看」要等第 4 階段做旅程時一起做。
+- 照片在第 1 階段原本兩種尺寸都存在手機上，登入後上傳完會把大圖移到暫存，暫存超過上限就會刪掉（雲端還有）。
 
 - 在這個開發環境連不到 OSM、Nominatim、Overpass、匯率 API，這些只用假資料測過，要在 iPhone 上確認真的能用。
 - iOS Safari 的 canvas 可能無法輸出 WebP，會自動改用 JPEG（計畫中的 WASM 編碼器還沒做，看實測檔案大小再決定）。

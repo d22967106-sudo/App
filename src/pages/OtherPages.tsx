@@ -7,6 +7,9 @@ import { formatTwd } from '../lib/currency'
 import { getAllEntries, requestPersistentStorage } from '../lib/db'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { toDateKey, totalTwd } from '../lib/ledger'
+import { onCloudChange } from '../lib/cloud'
+import { cloudReady } from '../lib/sync'
+import { CloudSection } from './CloudSection'
 
 function Placeholder({ icon, title, text }: { icon: IconName; title: string; text: string }) {
   return (
@@ -69,13 +72,29 @@ export function StatsPage() {
       .catch(() => {})
   }, [entries])
 
+  const [withCloud, setWithCloud] = useState(false)
+  const [progress, setProgress] = useState('')
+  const [cloudOn, setCloudOn] = useState(false)
+  useEffect(() => {
+    const load = () => {
+      cloudReady().then(setCloudOn)
+    }
+    load()
+    return onCloudChange(load)
+  }, [])
+
   const doExport = async () => {
     setBusy('export')
     try {
-      const { blob, filename, counts } = await buildBackup()
+      const { blob, filename, counts } = await buildBackup({
+        withCloudPhotos: withCloud,
+        onProgress: withCloud ? (d, t) => setProgress(`照片 ${d}/${t}`) : undefined,
+      })
+      setProgress('')
       await shareOrDownload(blob, filename)
       toast(`已匯出 ${counts.entries} 筆紀錄、${counts.photos} 張照片`)
     } catch (e) {
+      setProgress('')
       toast('匯出失敗：' + (e as Error).message, 4000)
     } finally {
       setBusy(null)
@@ -122,6 +141,8 @@ export function StatsPage() {
           </p>
         </section>
 
+        <CloudSection />
+
         <section className="card" aria-label="地圖樣式">
           <h2 className="section-title">地圖樣式</h2>
           <MapStylePicker />
@@ -132,11 +153,24 @@ export function StatsPage() {
             資料與備份
           </h2>
           <p className="muted" style={{ fontSize: 14, margin: 0 }}>
-            目前資料只存在這支手機上。建議定期匯出備份（一個 zip 檔，內含 data.json 與照片），存到「檔案」或 iCloud。
+            {cloudOn
+              ? '資料已同步到雲端。也可以另外匯出一份備份（zip 檔，內含 data.json 與照片），存到「檔案」或 iCloud。'
+              : '目前資料只存在這支手機上。建議定期匯出備份（一個 zip 檔，內含 data.json 與照片），存到「檔案」或 iCloud。'}
           </p>
+          {cloudOn && (
+            <label className="kv" style={{ fontSize: 14 }}>
+              <span>
+                包含雲端上的大圖
+                <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+                  要逐張下載，照片多時檔案很大、比較久；不勾只放縮圖和手機上有的大圖
+                </span>
+              </span>
+              <input type="checkbox" checked={withCloud} onChange={(e) => setWithCloud(e.target.checked)} style={{ width: 22, height: 22 }} />
+            </label>
+          )}
           <button className="btn-outline" onClick={doExport} disabled={busy != null}>
             {busy === 'export' ? <span className="spinner" /> : <Icon name="download" size={18} />}
-            匯出全部資料
+            {progress || '匯出全部資料'}
           </button>
           <button className="btn-outline" onClick={() => fileRef.current?.click()} disabled={busy != null}>
             {busy === 'import' ? <span className="spinner" /> : <Icon name="upload" size={18} />}
@@ -183,7 +217,7 @@ export function StatsPage() {
         </section>
 
         <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-          記帳日記 · 第 1 階段 · {__BUILD_DATE__}
+          記帳日記 · 第 2 階段 · {__BUILD_DATE__}
         </p>
       </div>
     </div>

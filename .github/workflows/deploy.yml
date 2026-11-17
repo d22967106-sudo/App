@@ -2,7 +2,7 @@ name: 發布到 GitHub Pages
 
 on:
   push:
-    branches: [main, claude/confident-babbage-8nlxkb]
+    branches: [main, claude/confident-babbage-8nlxkb, claude/start-phase-two-wqljng]
   workflow_dispatch:
 
 permissions:

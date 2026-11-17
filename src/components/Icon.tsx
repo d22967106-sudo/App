@@ -76,6 +76,8 @@ const PATHS = {
       <path d="M16 16l4.5 4.5" />
     </>
   ),
+  cloud: <path d="M7 18h10a4 4 0 0 0 .6-7.96A6 6 0 0 0 6.2 9.1 4.5 4.5 0 0 0 7 18z" />,
+  refresh: <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4" />,
   home: <path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" />,
   layers: (
     <>

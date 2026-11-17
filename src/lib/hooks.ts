@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { getPhoto, subscribe } from './db'
+import { getDisplayBlob } from './sync'
 
 /** 執行查詢，資料庫一有變動就重新查詢 */
 export function useLiveQuery<T>(query: () => Promise<T>, deps: unknown[]): T | undefined {
@@ -43,7 +44,22 @@ export function useObjectUrl(blob: Blob | null | undefined): string | undefined 
 /** 讀取照片縮圖或顯示版的網址 */
 export function usePhotoUrl(id: string | undefined, size: 'thumb' | 'display' = 'thumb'): string | undefined {
   const photo = useLiveQuery(() => (id ? getPhoto(id) : Promise.resolve(undefined)), [id])
-  const blob = photo ? (size === 'display' ? (photo.display ?? photo.thumb) : photo.thumb) : null
+  // 大圖：手機上沒有就從暫存或雲端拿，拿到之前先顯示縮圖
+  const [display, setDisplay] = useState<{ id: string; blob: Blob } | null>(null)
+  const wantRemote = size === 'display' && !!photo && !photo.display
+  useEffect(() => {
+    const p = photo
+    if (!wantRemote || !p) return
+    let alive = true
+    getDisplayBlob(p).then((b) => alive && b && setDisplay({ id: p.id, blob: b }), () => {})
+    return () => {
+      alive = false
+    }
+    // 只在換照片或上傳狀態改變時重新抓（photo 物件每次查詢都是新的）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantRemote, photo?.id, photo?.uploaded])
+  const remote = display && display.id === photo?.id ? display.blob : null
+  const blob = photo ? (size === 'display' ? (photo.display ?? remote ?? photo.thumb) : photo.thumb) : null
   return useObjectUrl(blob)
 }
 

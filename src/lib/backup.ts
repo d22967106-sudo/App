@@ -1,5 +1,6 @@
 import { strFromU8, strToU8, unzip, zip, type Unzipped } from 'fflate'
-import { dumpAll, restoreAll } from './db'
+import { cacheGet, dumpAll, restoreAll } from './db'
+import { getDisplayBlob } from './sync'
 import { toDateKey } from './ledger'
 import { photoExt } from './photos'
 import type { DailySummary, Entry, Photo, Place, TrackPoint } from './types'
@@ -13,7 +14,7 @@ import type { DailySummary, Entry, Photo, Place, TrackPoint } from './types'
 export const BACKUP_FORMAT = 'ledger-diary-backup'
 export const BACKUP_VERSION = 1
 
-type PhotoMeta = Omit<Photo, 'thumb' | 'display'> & { thumbFile: string; displayFile: string | null }
+type PhotoMeta = Omit<Photo, 'thumb' | 'display'> & { thumbFile: string | null; displayFile: string | null }
 
 interface BackupJson {
   format: typeof BACKUP_FORMAT
@@ -33,17 +34,29 @@ const unzipAsync = (data: Uint8Array) =>
 
 const blobBytes = async (b: Blob) => new Uint8Array(await b.arrayBuffer())
 
-export async function buildBackup(): Promise<{ blob: Blob; filename: string; counts: Record<string, number> }> {
+/**
+ * withCloudPhotos：大圖已經上傳到雲端、手機上沒有的，也從雲端下載放進備份
+ * （照片多時檔案會很大、iPhone 記憶體可能不夠，所以預設只放手機上有的）。
+ */
+export async function buildBackup(
+  opts: { withCloudPhotos?: boolean; onProgress?: (done: number, total: number) => void } = {},
+): Promise<{ blob: Blob; filename: string; counts: Record<string, number> }> {
   const all = await dumpAll()
   const files: Record<string, Uint8Array | [Uint8Array, { level: 0 }]> = {}
   const photos: PhotoMeta[] = []
+  let n = 0
   for (const p of all.photos) {
-    const thumbFile = `photos/${p.id}.thumb.${photoExt(p.thumb)}`
-    files[thumbFile] = [await blobBytes(p.thumb), { level: 0 }] // 已壓縮過，不再壓
+    opts.onProgress?.(n++, all.photos.length)
+    let thumbFile: string | null = null
+    if (p.thumb) {
+      thumbFile = `photos/${p.id}.thumb.${photoExt(p.thumb)}`
+      files[thumbFile] = [await blobBytes(p.thumb), { level: 0 }] // 已壓縮過，不再壓
+    }
     let displayFile: string | null = null
-    if (p.display) {
-      displayFile = `photos/${p.id}.display.${photoExt(p.display)}`
-      files[displayFile] = [await blobBytes(p.display), { level: 0 }]
+    const display = p.display ?? (await cacheGet(p.id)) ?? (opts.withCloudPhotos ? await getDisplayBlob(p) : null)
+    if (display) {
+      displayFile = `photos/${p.id}.display.${photoExt(display)}`
+      files[displayFile] = [await blobBytes(display), { level: 0 }]
     }
     const { thumb: _t, display: _d, ...meta } = p
     photos.push({ ...meta, thumbFile, displayFile })
@@ -85,13 +98,14 @@ export async function restoreBackup(file: Blob): Promise<{ entries: number; phot
   if (json.version > BACKUP_VERSION) throw new Error('備份檔版本比 App 新，請先更新 App')
   const photos: Photo[] = []
   for (const m of json.photos ?? []) {
-    const t = files[m.thumbFile]
-    if (!t) continue
+    const t = m.thumbFile ? files[m.thumbFile] : undefined
     const d = m.displayFile ? files[m.displayFile] : undefined
+    // 沒有圖檔、也不在雲端的照片就跳過
+    if (!t && !d && !m.uploaded) continue
     const { thumbFile, displayFile, ...rest } = m
     photos.push({
       ...rest,
-      thumb: new Blob([t as BlobPart], { type: mimeOf(thumbFile) }),
+      thumb: t && thumbFile ? new Blob([t as BlobPart], { type: mimeOf(thumbFile) }) : null,
       display: d && displayFile ? new Blob([d as BlobPart], { type: mimeOf(displayFile) }) : null,
     })
   }

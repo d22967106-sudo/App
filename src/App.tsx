@@ -3,6 +3,7 @@ import { TabBar, ToastHost } from './components/ui'
 import { requestPersistentStorage } from './lib/db'
 import { useRoute } from './lib/hooks'
 import { loadRates } from './lib/rates'
+import { startAutoSync } from './lib/sync'
 import { DayPage } from './pages/DayPage'
 import { EntryPage } from './pages/EntryPage'
 import { MapPage } from './pages/MapPage'
@@ -15,6 +16,7 @@ export default function App() {
   useEffect(() => {
     requestPersistentStorage()
     loadRates().catch(() => {})
+    startAutoSync()
   }, [])
 
   let page

@@ -74,10 +74,12 @@ export interface TrackPoint {
 export interface Photo {
   id: string
   entryId: string
-  /** 長邊 400px 縮圖 */
-  thumb: Blob
-  /** 長邊 2048px 顯示版（第 2 階段上傳後會刪除本地副本） */
+  /** 長邊 400px 縮圖（手機和雲端各一份；從雲端同步下來、還沒下載完時為 null） */
+  thumb: Blob | null
+  /** 長邊 2048px 顯示版（上傳到雲端後刪除本地副本，改放有上限的暫存） */
   display: Blob | null
+  /** 縮圖與顯示版都已上傳到雲端 */
+  uploaded?: boolean
   width: number
   height: number
   /** 原始照片拍攝時間（方便回相簿找原圖） */
@@ -97,6 +99,8 @@ export interface Place {
   currency: string
   visits: number
   lastVisit: number
+  /** 最後修改時間（同步用；舊資料沒有，就用 lastVisit） */
+  updatedAt?: number
 }
 
 export interface RateCache {
