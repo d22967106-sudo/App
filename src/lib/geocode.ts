@@ -110,21 +110,62 @@ export function parseOverpass(json: unknown, center: GeoPoint, limit = 25): Near
   return out.sort((a, b) => a.distance - b.distance).slice(0, limit)
 }
 
-/** 用 Overpass 查附近店家（失敗回傳空陣列） */
-export async function nearbyShops(p: GeoPoint, radius = 150, signal?: AbortSignal): Promise<NearbyShop[]> {
-  const q =
-    `[out:json][timeout:10];` +
-    `nwr(around:${radius},${p.lat},${p.lng})[name][~"^(amenity|shop|tourism|leisure)$"~"."];` +
-    `out center 60;`
-  try {
-    const res = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      body: new URLSearchParams({ data: q }),
-      signal,
-    })
-    if (!res.ok) return []
-    return parseOverpass(await res.json(), p)
-  } catch {
-    return []
+/** 免費的公共 Overpass 伺服器；第一台忙碌或沒回應就換下一台 */
+export const OVERPASS_ENDPOINTS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+]
+
+export interface ShopResult {
+  /** 是否有伺服器成功回應（false＝網路或服務問題，不是「附近沒店」） */
+  ok: boolean
+  shops: NearbyShop[]
+}
+
+async function runOverpass(query: string, center: GeoPoint, signal?: AbortSignal): Promise<ShopResult> {
+  for (const url of OVERPASS_ENDPOINTS) {
+    if (signal?.aborted) break
+    try {
+      const timeout = AbortSignal.timeout(9000)
+      const res = await fetch(url, {
+        method: 'POST',
+        body: new URLSearchParams({ data: query }),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      })
+      if (!res.ok) continue
+      return { ok: true, shops: parseOverpass(await res.json(), center) }
+    } catch {
+      /* 換下一台 */
+    }
   }
+  return { ok: false, shops: [] }
+}
+
+const POI_FILTER = '[~"^(amenity|shop|tourism|leisure|craft|office)$"~"."]'
+
+/** 附近有名字的店家、景點 */
+export function nearbyShops(p: GeoPoint, radius = 200, signal?: AbortSignal): Promise<ShopResult> {
+  const q = `[out:json][timeout:8];nwr(around:${radius},${p.lat},${p.lng})[name]${POI_FILTER};out center 80;`
+  return runOverpass(q, p, signal)
+}
+
+/** 把使用者輸入轉成安全的 Overpass 正規表示式（不分大小寫） */
+export function overpassNameRegex(text: string): string {
+  return text
+    .trim()
+    .replace(/[\\.*+?^${}()|[\]"]/g, (c) => (c === '"' ? '' : `\\\\${c}`))
+    .replace(/\s+/g, '.*')
+}
+
+/** 用店名搜尋附近（預設 2 公里） */
+export function searchShops(p: GeoPoint, text: string, radius = 2000, signal?: AbortSignal): Promise<ShopResult> {
+  const re = overpassNameRegex(text)
+  if (!re) return Promise.resolve({ ok: true, shops: [] })
+  const q =
+    `[out:json][timeout:10];(` +
+    `nwr(around:${radius},${p.lat},${p.lng})["name"~"${re}",i]${POI_FILTER};` +
+    `nwr(around:${radius},${p.lat},${p.lng})["name:zh"~"${re}",i]${POI_FILTER};` +
+    `);out center 40;`
+  return runOverpass(q, p, signal)
 }

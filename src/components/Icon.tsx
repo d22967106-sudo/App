@@ -77,6 +77,12 @@ const PATHS = {
     </>
   ),
   home: <path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z" />,
+  layers: (
+    <>
+      <path d="M12 3l9 5-9 5-9-5z" />
+      <path d="M3 13l9 5 9-5" />
+    </>
+  ),
   expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
   // 心情
   moodGreat: (

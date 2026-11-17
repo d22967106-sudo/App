@@ -1,6 +1,8 @@
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { useEffect, useRef } from 'react'
+import type React from 'react'
+import { useMapStyle } from '../lib/mapStyles'
 import type { GeoPoint } from '../lib/types'
 
 export interface MapMarker {
@@ -89,6 +91,7 @@ export function MapView({
   const playRef = useRef<L.Marker | null>(null)
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
+  const style = useMapStyle()
 
   // 建立地圖
   useEffect(() => {
@@ -105,11 +108,6 @@ export function MapView({
       tapHold: false,
     })
     map.attributionControl.setPrefix(false)
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a>',
-      crossOrigin: false,
-    }).addTo(map)
     layerRef.current = L.layerGroup().addTo(map)
     map.setView([fallbackCenter.lat, fallbackCenter.lng], 14)
     mapRef.current = map
@@ -122,6 +120,22 @@ export function MapView({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 圖磚（換樣式時換掉）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    const layer = L.tileLayer(style.url, {
+      maxZoom: style.maxZoom,
+      subdomains: style.subdomains ?? 'abc',
+      attribution: style.attribution,
+      detectRetina: false,
+    }).addTo(map)
+    layer.bringToBack()
+    return () => {
+      layer.remove()
+    }
+  }, [style])
 
   // 畫路線與標記
   const routeKey = JSON.stringify(route.map((p) => [p.lat, p.lng]))
@@ -204,5 +218,13 @@ export function MapView({
     }
   }, [playhead])
 
-  return <div ref={elRef} className={`map-fill map-tint ${className ?? ''}`} role="region" aria-label={ariaLabel} />
+  return (
+    <div
+      ref={elRef}
+      className={`map-fill map-tint ${className ?? ''}`}
+      style={{ '--tile-filter': style.filter } as React.CSSProperties}
+      role="region"
+      aria-label={ariaLabel}
+    />
+  )
 }

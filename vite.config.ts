@@ -40,7 +40,7 @@ export default defineConfig({
         runtimeCaching: [
           {
             // 地圖圖磚：去過的區域暫存起來，離線也看得到
-            urlPattern: /^https:\/\/tile\.openstreetmap\.org\//,
+            urlPattern: /^https:\/\/(tile\.openstreetmap\.org|[a-d]\.basemaps\.cartocdn\.com)\//,
             handler: 'CacheFirst',
             options: {
               cacheName: 'osm-tiles',

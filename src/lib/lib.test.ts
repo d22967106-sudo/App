@@ -5,7 +5,7 @@ import { currencyForCountry, formatCurrency, rateFromPerTwd, toTwd } from './cur
 import { buildRoute, buildTimeline, dayStats } from './day'
 import * as db from './db'
 import { countPlaces, distanceM, routeKm } from './geo'
-import { parseOverpass, shortPlaceName } from './geocode'
+import { overpassNameRegex, parseOverpass, shortPlaceName } from './geocode'
 import {
   formatDateLong,
   fromDateTimeLocal,
@@ -136,6 +136,15 @@ describe('地名與附近店家', () => {
     expect(r.map((s) => s.name)).toEqual(['7-ELEVEN', '拉麵店'])
     expect(r[0].categoryId).toBe('daily')
     expect(r[1]).toMatchObject({ categoryId: 'food', kindLabel: '餐廳' })
+  })
+})
+
+describe('店名搜尋', () => {
+  it('跳脫特殊字元、空白變成任意字元', () => {
+    expect(overpassNameRegex('一蘭')).toBe('一蘭')
+    expect(overpassNameRegex(' 7-11 便利 ')).toBe('7-11.*便利')
+    expect(overpassNameRegex('a.b(c)')).toBe('a\\\\.b\\\\(c\\\\)')
+    expect(overpassNameRegex('say "hi"')).toBe('say.*hi')
   })
 })
 

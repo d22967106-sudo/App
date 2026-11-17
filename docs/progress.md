@@ -7,15 +7,21 @@
 **第 1 階段程式已完成，等使用者在 iPhone 上實測。**
 
 - 程式在分支 `claude/confident-babbage-8nlxkb`（React + TypeScript + Vite，Leaflet、idb、fflate、vite-plugin-pwa）。
+- 注意：從 Safari 網址列開是網頁介面；「加入主畫面」後從圖示開才是全螢幕。
 - 發布：`.github/workflows/deploy.yml` 會在 push 時 build 並發布到 GitHub Pages。
   已上線（repo 已公開、Pages Source 已設為 GitHub Actions）：https://d22967106-sudo.github.io/App/
 - 下一步：使用者實測回饋 → 修正 → 進第 2 階段（雲端）。
+
+### 實測回饋修正（第 1 輪）
+
+- 地圖顏色不好看 → 新增 4 種地圖樣式（都是 OSM 資料、免費免金鑰）：奶茶淡色（CARTO Positron＋暖色濾鏡，**預設**）、清爽彩色（CARTO Voyager）、OSM 原版、OSM 奶茶。地圖右側「樣式」按鈕或「統計」分頁可切換，選擇存在 IndexedDB（`src/lib/mapStyles.ts`）。
+- 店名搜尋看起來不能用 → ① 店名欄可打字篩選附近店家，按放大鏡或鍵盤「搜尋」查 2 公里內的店名 ② 顯示查詢中／查不到／失敗可重試的狀態 ③ Overpass 三台伺服器輪流（overpass-api.de → overpass.kumi.systems → overpass.private.coffee），每台 9 秒逾時 ④ 附近範圍 150 → 200 公尺。
 
 ### 程式結構
 
 - `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
 - `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
-- 測試：`npm test`（單元測試 27 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
+- 測試：`npm test`（單元測試 28 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
 
 ### 第 1 階段的做法與決定
 

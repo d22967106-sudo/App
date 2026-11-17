@@ -2,6 +2,7 @@ import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Icon } from '../components/Icon'
 import { MapView, type MapMarker } from '../components/MapView'
+import { MapStyleSheet } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
@@ -68,6 +69,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const thumbs = useThumbUrls(entries)
   const [selected, setSelected] = useState<string | null>(null)
   const [checkingIn, setCheckingIn] = useState(false)
+  const [showStyles, setShowStyles] = useState(false)
 
   const { peek, full } = useSheetHeights()
   const [sheetH, setSheetH] = useState<number | null>(null)
@@ -275,6 +277,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       </div>
 
       <div className="map-actions" style={{ bottom: `calc(var(--tabbar-h) + ${height + 16}px)` }} hidden={expanded}>
+        <button className="checkin-btn" onClick={() => setShowStyles(true)} aria-label="地圖樣式">
+          <Icon name="layers" size={18} />
+          樣式
+        </button>
         {route.length > 1 && (
           <button className="checkin-btn" onClick={play} aria-label={playhead ? '停止播放' : '播放當天行程'}>
             <Icon name={playhead ? 'pause' : 'play'} size={18} />
@@ -349,6 +355,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           )}
         </div>
       </section>
+      {showStyles && <MapStyleSheet onClose={() => setShowStyles(false)} />}
     </div>
   )
 }

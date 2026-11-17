@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon, type IconName } from '../components/Icon'
+import { MapStylePicker } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { buildBackup, restoreBackup, shareOrDownload } from '../lib/backup'
 import { formatTwd } from '../lib/currency'
@@ -98,7 +99,7 @@ export function StatsPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <h1>統計與備份</h1>
+        <h1>統計與設定</h1>
       </div>
 
       <div className="stack">
@@ -119,6 +120,11 @@ export function StatsPage() {
           <p className="muted" style={{ fontSize: 13, margin: '8px 0 0' }}>
             每日／每月／分類的完整統計會在第 4 階段加入。
           </p>
+        </section>
+
+        <section className="card" aria-label="地圖樣式">
+          <h2 className="section-title">地圖樣式</h2>
+          <MapStylePicker />
         </section>
 
         <section className="card stack" aria-label="資料與備份">

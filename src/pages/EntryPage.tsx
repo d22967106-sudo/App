@@ -1,3 +1,4 @@
+import type React from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { PhotoImg, toast } from '../components/ui'
@@ -5,7 +6,7 @@ import { categoriesFor, defaultCategory } from '../lib/categories'
 import { COUNTRY_NAME, CURRENCIES, currencyForCountry, currencyInfo, formatNumber, formatTwd, toTwd } from '../lib/currency'
 import { deleteEntry, getEntry, getMeta, newId, saveEntry, setMeta } from '../lib/db'
 import { getCurrentPosition } from '../lib/geo'
-import { nearbyShops, reverseGeocode, type NearbyShop } from '../lib/geocode'
+import { nearbyShops, reverseGeocode, searchShops, type NearbyShop } from '../lib/geocode'
 import { goBack, navigate } from '../lib/hooks'
 import {
   formatDateTimeShort,
@@ -66,6 +67,11 @@ export function EntryPage({ id, date }: Props) {
   const [processing, setProcessing] = useState(0)
   const [shops, setShops] = useState<NearbyShop[]>([])
   const [remembered, setRemembered] = useState<PlaceSuggestion[]>([])
+  /** 從清單點選的店名（點選後不再拿來篩選） */
+  const [pickedName, setPickedName] = useState<string | null>(null)
+  const [shopState, setShopState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  /** 打字搜尋的結果：query 是搜尋時的文字 */
+  const [search, setSearch] = useState<{ query: string; state: 'loading' | 'ok' | 'error'; shops: NearbyShop[] } | null>(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -96,6 +102,7 @@ export function EntryPage({ id, date }: Props) {
       setRateInfo('manual')
       setCategoryId(e.categoryId)
       setTitle(e.title)
+      setPickedName(e.title)
       setPlaceId(e.placeId)
       setNote(e.note)
       setTime(e.time)
@@ -122,7 +129,7 @@ export function EntryPage({ id, date }: Props) {
       setLocState('done')
       setMeta('lastPos', { lat: pos.lat, lng: pos.lng })
       suggestPlaces(loc).then((r) => seq === locateSeq.current && setRemembered(r))
-      nearbyShops(loc).then((r) => seq === locateSeq.current && setShops(r))
+      loadNearby(loc, seq)
       const geo = await reverseGeocode(loc)
       if (seq !== locateSeq.current || !geo) return
       setLocation((cur) => (cur ? { ...cur, name: geo.name, countryCode: geo.countryCode } : cur))
@@ -185,6 +192,7 @@ export function EntryPage({ id, date }: Props) {
   function pickRemembered(s: PlaceSuggestion) {
     const p = s.place
     setTitle(p.name)
+    setPickedName(p.name)
     touched.current.title = true
     setPlaceId(p.id)
     if (p.categoryId && kind !== 'diary') setCategoryId(p.categoryId)
@@ -196,6 +204,7 @@ export function EntryPage({ id, date }: Props) {
 
   function pickShop(s: NearbyShop) {
     setTitle(s.name)
+    setPickedName(s.name)
     touched.current.title = true
     setPlaceId(null)
     if (s.categoryId && kind === 'expense' && !touched.current.category) setCategoryId(s.categoryId)
@@ -203,10 +212,39 @@ export function EntryPage({ id, date }: Props) {
     setLocation((cur) => ({ ...(cur ?? {}), lat: s.lat, lng: s.lng, accuracy: undefined }) as EntryLocation)
   }
 
+  function loadNearby(loc: EntryLocation, seq = locateSeq.current) {
+    setShopState('loading')
+    nearbyShops(loc).then((r) => {
+      if (seq !== locateSeq.current) return
+      setShops(r.shops)
+      setShopState(r.ok ? 'ok' : 'error')
+    })
+  }
+
+  async function runSearch() {
+    const q = title.trim()
+    if (!q || !location) return
+    setSearch({ query: q, state: 'loading', shops: [] })
+    const r = await searchShops(location, q)
+    setSearch((cur) => (cur?.query === q ? { query: q, state: r.ok ? 'ok' : 'error', shops: r.shops } : cur))
+  }
+
+  // 店名欄有字、而且不是剛從清單點選的 → 用來篩選附近店家
+  const filterText = title !== pickedName ? title.trim().toLowerCase() : ''
+  const searching = search && (search.query === title.trim() || title === pickedName) ? search : null
+
+  const rememberedChips = useMemo(
+    () => (filterText ? remembered.filter((r) => r.place.name.toLowerCase().includes(filterText)) : remembered),
+    [remembered, filterText],
+  )
+
   const shopChips = useMemo(() => {
     const names = new Set(remembered.map((r) => r.place.name))
-    return shops.filter((s) => !names.has(s.name)).slice(0, 15)
-  }, [shops, remembered])
+    const base = searching ? searching.shops : shops
+    const list = base.filter((s) => !names.has(s.name))
+    const filtered = filterText && !searching ? list.filter((s) => s.name.toLowerCase().includes(filterText)) : list
+    return filtered.slice(0, 20)
+  }, [shops, remembered, filterText, searching])
 
   // ── 照片 ──
   async function addPhotos(files: FileList | null) {
@@ -411,20 +449,34 @@ export function EntryPage({ id, date }: Props) {
 
       <div className="field">
         <label htmlFor="title">{kind === 'diary' ? '標題' : '店名'}</label>
-        <input
-          id="title"
-          className="text-input"
-          placeholder={kind === 'diary' ? '可不填' : '例如：捷運站旁咖啡'}
-          value={title}
-          onChange={(e) => {
-            setTitle(e.target.value)
-            setPlaceId(null)
-          }}
-          enterKeyHint="next"
-        />
-        {(remembered.length > 0 || shopChips.length > 0) && (
+        <div className="title-row">
+          <input
+            id="title"
+            className="text-input"
+            placeholder={kind === 'diary' ? '可不填' : '輸入或從下面選'}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              setPlaceId(null)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                runSearch()
+              }
+            }}
+            enterKeyHint="search"
+            autoComplete="off"
+          />
+          {location && title.trim() && (
+            <button className="search-btn" onClick={runSearch} aria-label={`搜尋附近 2 公里內叫「${title.trim()}」的店`}>
+              <Icon name="search" size={18} />
+            </button>
+          )}
+        </div>
+        {(rememberedChips.length > 0 || shopChips.length > 0) && (
           <div className="suggestions" aria-label="附近店家">
-            {remembered.map((s) => (
+            {rememberedChips.map((s) => (
               <button key={s.place.id} className="remembered" onClick={() => pickRemembered(s)}>
                 {s.place.name}
                 <small>去過 {s.place.visits} 次</small>
@@ -435,12 +487,23 @@ export function EntryPage({ id, date }: Props) {
                 {s.name}
                 <small>
                   {s.kindLabel ? `${s.kindLabel} · ` : ''}
-                  {s.distance}m
+                  {s.distance >= 1000 ? `${(s.distance / 1000).toFixed(1)}km` : `${s.distance}m`}
                 </small>
               </button>
             ))}
           </div>
         )}
+        <ShopStatus
+          hasLocation={locState === 'done' && !!location}
+          locating={locState === 'locating'}
+          nearbyState={shopState}
+          nearbyCount={shops.length + remembered.length}
+          filterText={filterText}
+          visibleCount={rememberedChips.length + shopChips.length}
+          search={searching}
+          onRetryNearby={() => location && loadNearby(location)}
+          onSearch={runSearch}
+        />
       </div>
 
       <div className="field">
@@ -513,6 +576,8 @@ export function EntryPage({ id, date }: Props) {
               setLocation(null)
               setLocState('idle')
               setShops([])
+              setShopState('idle')
+              setSearch(null)
               setRemembered([])
             }}
           >
@@ -554,6 +619,96 @@ export function EntryPage({ id, date }: Props) {
           金額 {formatNumber(amount)} 元
         </span>
       )}
+    </div>
+  )
+}
+
+function ShopStatus({
+  hasLocation,
+  locating,
+  nearbyState,
+  nearbyCount,
+  filterText,
+  visibleCount,
+  search,
+  onRetryNearby,
+  onSearch,
+}: {
+  hasLocation: boolean
+  locating: boolean
+  nearbyState: 'idle' | 'loading' | 'ok' | 'error'
+  nearbyCount: number
+  filterText: string
+  visibleCount: number
+  search: { query: string; state: 'loading' | 'ok' | 'error'; shops: NearbyShop[] } | null
+  onRetryNearby: () => void
+  onSearch: () => void
+}) {
+  let content: React.ReactNode = null
+  if (search) {
+    if (search.state === 'loading')
+      content = (
+        <>
+          <span className="spinner" />
+          搜尋「{search.query}」中…
+        </>
+      )
+    else if (search.state === 'error')
+      content = (
+        <>
+          搜尋失敗（網路或服務忙碌）
+          <button className="link-btn" onClick={onSearch}>
+            重試
+          </button>
+        </>
+      )
+    else if (!search.shops.length) content = <>附近 2 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
+    else content = <>2 公里內符合「{search.query}」的店家</>
+  } else if (locating) {
+    content = '定位後會列出附近店家'
+  } else if (!hasLocation) {
+    content = '沒有地點，無法查附近店家；可以直接輸入店名'
+  } else if (nearbyState === 'loading') {
+    content = (
+      <>
+        <span className="spinner" />
+        查詢附近店家中…
+      </>
+    )
+  } else if (nearbyState === 'error') {
+    content = (
+      <>
+        附近店家查不到（網路或服務忙碌）
+        <button className="link-btn" onClick={onRetryNearby}>
+          重試
+        </button>
+      </>
+    )
+  } else if (filterText && visibleCount === 0) {
+    content = (
+      <>
+        附近沒有符合的店家
+        <button className="link-btn" onClick={onSearch}>
+          搜尋 2 公里內
+        </button>
+      </>
+    )
+  } else if (filterText) {
+    content = (
+      <>
+        找不到想要的？
+        <button className="link-btn" onClick={onSearch}>
+          搜尋 2 公里內
+        </button>
+      </>
+    )
+  } else if (nearbyState === 'ok' && nearbyCount === 0) {
+    content = '附近 200 公尺內沒有登錄名字的店家，可以直接輸入店名再按搜尋'
+  }
+  if (!content) return null
+  return (
+    <div className="shop-status" aria-live="polite">
+      {content}
     </div>
   )
 }
