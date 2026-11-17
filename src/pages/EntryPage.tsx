@@ -71,7 +71,8 @@ export function EntryPage({ id, date }: Props) {
   const [pickedName, setPickedName] = useState<string | null>(null)
   const [shopState, setShopState] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   /** 打字搜尋的結果：query 是搜尋時的文字 */
-  const [search, setSearch] = useState<{ query: string; state: 'loading' | 'ok' | 'error'; shops: NearbyShop[] } | null>(null)
+  const [search, setSearch] = useState<SearchState | null>(null)
+  const [nearbyErrors, setNearbyErrors] = useState<string[]>([])
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -218,6 +219,7 @@ export function EntryPage({ id, date }: Props) {
       if (seq !== locateSeq.current) return
       setShops(r.shops)
       setShopState(r.ok ? 'ok' : 'error')
+      setNearbyErrors(r.errors ?? [])
     })
   }
 
@@ -226,7 +228,9 @@ export function EntryPage({ id, date }: Props) {
     if (!q || !location) return
     setSearch({ query: q, state: 'loading', shops: [] })
     const r = await searchShops(location, q)
-    setSearch((cur) => (cur?.query === q ? { query: q, state: r.ok ? 'ok' : 'error', shops: r.shops } : cur))
+    setSearch((cur) =>
+      cur?.query === q ? { query: q, state: r.ok ? 'ok' : 'error', shops: r.shops, errors: r.errors ?? [] } : cur,
+    )
   }
 
   // 店名欄有字、而且不是剛從清單點選的 → 用來篩選附近店家
@@ -497,6 +501,7 @@ export function EntryPage({ id, date }: Props) {
           hasLocation={locState === 'done' && !!location}
           locating={locState === 'locating'}
           nearbyState={shopState}
+          nearbyErrors={nearbyErrors}
           nearbyCount={shops.length + remembered.length}
           filterText={filterText}
           visibleCount={rememberedChips.length + shopChips.length}
@@ -623,10 +628,24 @@ export function EntryPage({ id, date }: Props) {
   )
 }
 
+interface SearchState {
+  query: string
+  state: 'loading' | 'ok' | 'error'
+  shops: NearbyShop[]
+  errors?: string[]
+}
+
+/** 失敗原因小字：使用者截圖回報時看得出是哪個服務出問題 */
+function ErrorDetail({ errors }: { errors?: string[] }) {
+  if (!errors?.length) return null
+  return <small className="error-detail">{errors.join('、')}</small>
+}
+
 function ShopStatus({
   hasLocation,
   locating,
   nearbyState,
+  nearbyErrors,
   nearbyCount,
   filterText,
   visibleCount,
@@ -637,10 +656,11 @@ function ShopStatus({
   hasLocation: boolean
   locating: boolean
   nearbyState: 'idle' | 'loading' | 'ok' | 'error'
+  nearbyErrors: string[]
   nearbyCount: number
   filterText: string
   visibleCount: number
-  search: { query: string; state: 'loading' | 'ok' | 'error'; shops: NearbyShop[] } | null
+  search: SearchState | null
   onRetryNearby: () => void
   onSearch: () => void
 }) {
@@ -660,6 +680,7 @@ function ShopStatus({
           <button className="link-btn" onClick={onSearch}>
             重試
           </button>
+          <ErrorDetail errors={search.errors} />
         </>
       )
     else if (!search.shops.length) content = <>附近 2 公里內找不到「{search.query}」，直接用你輸入的店名即可</>
@@ -682,6 +703,7 @@ function ShopStatus({
         <button className="link-btn" onClick={onRetryNearby}>
           重試
         </button>
+        <ErrorDetail errors={nearbyErrors} />
       </>
     )
   } else if (filterText && visibleCount === 0) {

@@ -5,7 +5,7 @@ import { currencyForCountry, formatCurrency, rateFromPerTwd, toTwd } from './cur
 import { buildRoute, buildTimeline, dayStats } from './day'
 import * as db from './db'
 import { countPlaces, distanceM, routeKm } from './geo'
-import { overpassNameRegex, parseOverpass, shortPlaceName } from './geocode'
+import { overpassNameRegex, parseNominatimSearch, parseOverpass, parsePhotonSearch, shortPlaceName, viewbox } from './geocode'
 import {
   formatDateLong,
   fromDateTimeLocal,
@@ -140,6 +140,38 @@ describe('地名與附近店家', () => {
 })
 
 describe('店名搜尋', () => {
+  it('解析 Nominatim 搜尋結果，略過道路', () => {
+    const r = parseNominatimSearch(
+      [
+        { osm_type: 'node', osm_id: 1, lat: '25.034', lon: '121.565', name: '鼎泰豐', category: 'amenity', type: 'restaurant' },
+        { osm_type: 'way', osm_id: 2, lat: '25.035', lon: '121.565', name: '鼎泰路', category: 'highway', type: 'residential' },
+      ],
+      taipei101,
+    )
+    expect(r).toHaveLength(1)
+    expect(r[0]).toMatchObject({ name: '鼎泰豐', categoryId: 'food', kindLabel: '餐廳' })
+  })
+
+  it('解析 Photon 搜尋結果', () => {
+    const r = parsePhotonSearch(
+      {
+        features: [
+          { geometry: { coordinates: [121.565, 25.034] }, properties: { name: '誠品', osm_key: 'shop', osm_value: 'books', osm_type: 'N', osm_id: '3' } },
+          { geometry: { coordinates: [121.5, 25.0] }, properties: { name: '信義區', osm_key: 'place', osm_value: 'suburb' } },
+        ],
+      },
+      taipei101,
+    )
+    expect(r.map((s) => s.name)).toEqual(['誠品'])
+    expect(r[0]).toMatchObject({ categoryId: 'shopping', kindLabel: '書店' })
+  })
+
+  it('viewbox 約為上下左右各 2 公里', () => {
+    const [l, t, rr, b] = viewbox(taipei101, 2000).split(',').map(Number)
+    expect(distanceM({ lat: t, lng: taipei101.lng }, { lat: b, lng: taipei101.lng })).toBeCloseTo(4000, -2)
+    expect(distanceM({ lat: taipei101.lat, lng: l }, { lat: taipei101.lat, lng: rr })).toBeCloseTo(4000, -2)
+  })
+
   it('跳脫特殊字元、空白變成任意字元', () => {
     expect(overpassNameRegex('一蘭')).toBe('一蘭')
     expect(overpassNameRegex(' 7-11 便利 ')).toBe('7-11.*便利')

@@ -1626,3 +1626,10 @@ button:disabled {
   font-size: 14px;
   font-weight: 700;
 }
+
+.error-detail {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--text-2);
+  opacity: 0.8;
+}

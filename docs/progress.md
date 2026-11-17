@@ -21,12 +21,14 @@
   - 向量地圖用 MapLibre GL（透過 @maplibre/maplibre-gl-leaflet 掛在 Leaflet 上，Leaflet 架構不變）；載入失敗時自動改用 OSM 奶茶。
   - 原本用的 CARTO 圖磚實測顯示「API key required」（現在要金鑰），已移除。
 - 店名搜尋看起來不能用 → ① 店名欄可打字篩選附近店家，按放大鏡或鍵盤「搜尋」查 2 公里內的店名 ② 顯示查詢中／查不到／失敗可重試的狀態 ③ Overpass 三台伺服器輪流（overpass-api.de → overpass.kumi.systems → overpass.private.coffee），每台 9 秒逾時 ④ 附近範圍 150 → 200 公尺。
+- 實測「搜尋失敗」（Overpass 用名字搜尋太慢／太忙）→ 打字搜尋改成依序：**Nominatim search**（限定附近 2 公里方框）→ **Photon**（photon.komoot.io）→ Overpass；逾時改用自己的 AbortController（不依賴 AbortSignal.any）。失敗時在狀態列用小字列出每個服務的失敗原因（例如「nominatim：HTTP 429」），方便截圖回報。
+- 「附近店家」自動列表仍用 Overpass（三台輪流，每台 12 秒）；如果實測也常失敗，再考慮換方法。
 
 ### 程式結構
 
 - `src/lib/`：資料與邏輯（`db.ts` IndexedDB、`types.ts` 資料模型、`currency.ts`／`rates.ts` 多幣別、`geocode.ts` 地名與附近店家、`places.ts` 記住去過的店、`photos.ts` 壓縮與 EXIF、`backup.ts` 匯出入、`day.ts` 路線與統計）
 - `src/pages/`：`MapPage` 地圖首頁、`EntryPage` 新增／編輯紀錄、`DayPage` 一天的完整回顧、`OtherPages` 日曆／旅程（預留）與統計與備份
-- 測試：`npm test`（單元測試 30 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
+- 測試：`npm test`（單元測試 33 項）；瀏覽器端對端測試用 Playwright 模擬 iPhone 13，所有外部服務都用假資料（腳本沒放進 repo）
 
 ### 第 1 階段的做法與決定
 
