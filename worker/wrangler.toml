@@ -1,4 +1,5 @@
 # 照片伺服器的部署設定：讓 Cloudflare 直接從 GitHub 這個資料夾部署（不用在手機上貼程式碼）
+# Cloudflare 監聽的分支（Settings → Build → Production branch）：claude/confident-babbage-8nlxkb
 name = "ledger-photos"
 main = "photos.js"
 compatibility_date = "2026-11-01"

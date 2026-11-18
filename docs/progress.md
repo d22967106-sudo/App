@@ -46,6 +46,7 @@
 - 大圖畫質：使用者曾覺得從雲端下載的大圖「像素變低」，查證後是設計如此（顯示版長邊 2048、JPEG 80%，例如 1179×2556 的截圖變 945×2048），使用者接受，不改。
 - 第 2 階段工作分支：`claude/start-phase-two-wqljng`（deploy.yml 已加入這個分支，使用者也已在 Settings → Environments → github-pages 開放這個分支；push 就會發布到 GitHub Pages）。
 - **GitHub repo 的預設分支是 `claude/confident-babbage-8nlxkb`**，目前內容和 `claude/start-phase-two-wqljng` 相同（經使用者同意 fast-forward 合併過）。照片伺服器由 Cloudflare 從預設分支的 `worker/` 自動部署，所以**改 `worker/` 時要同步推到預設分支**（推到工作分支以外的分支前要先問使用者）。
+- **Cloudflare 的 Production branch 原本是 `claude/start-phase-two-wqljng`（不是預設分支），第 3 階段推到預設分支時沒有自動部署；2026-11-18 使用者已改成 `claude/confident-babbage-8nlxkb`。** 注意：Cloudflare 的「Retry build」會重新部署那筆紀錄當時的舊程式，不會抓最新的。
 - 照片伺服器：Cloudflare Worker `ledger-photos`，網址 https://ledger-photos.d22967106.workers.dev（`/health` 顯示 ok 表示設定正確）。Cloudflare Build 設定：Root directory＝`worker`，Build command＝`echo ok`，Deploy command＝`npx wrangler deploy`。R2 bucket `ledger-photos`。
 - Supabase 專案網址 https://ouyvyqcfesoguhkjebsj.supabase.co，publishable key 已寫在 `worker/wrangler.toml` 的 [vars]（公開值）；App 裡的雲端設定由使用者自己貼上。Confirm email 已關閉。
 - Supabase 的 **Allow new users to sign up** 已關閉（使用者 2026-11-17 確認）。
