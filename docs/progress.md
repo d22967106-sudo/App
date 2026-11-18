@@ -18,7 +18,7 @@
 
 ## 目前狀態
 
-**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（目前給到 A1、A2）。**
+**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成：SQL 執行成功、金鑰測試連線成功；下一步 B Overland）。**
 
 ### 第 3 階段的做法
 
@@ -164,7 +164,7 @@
 - [x] Scriptable 小工具（`scriptable/ledger-widget.js`，App 設定頁複製）
 - [x] 時間軸「抵達／離開」、步數顯示
 - [x] 部署：已推到預設分支（App 由 GitHub Actions、照片伺服器由 Cloudflare 自動部署；照片伺服器是否部署成功要使用者按「測試連線」確認）
-- [ ] 使用者執行 automation.sql、產生金鑰、設定 Overland／捷徑／Scriptable
+- [ ] 使用者執行 automation.sql、產生金鑰（已完成）、設定 Overland／捷徑／Scriptable
 - [ ] 使用者在 iPhone 上實測
 
 ## 第 4 階段：進階
