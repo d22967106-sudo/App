@@ -13,7 +13,7 @@ import { getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
-import { isAuto } from '../lib/stays'
+import { isAuto, usableAutoPoints } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
@@ -89,6 +89,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const stayNames = useStayNames(stays, entries)
   const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? [], stays), [entries, track, stays])
   const stats = useMemo(() => dayStats(entries ?? [], track ?? [], stays), [entries, track, stays])
+  const lastAuto = useMemo(() => usableAutoPoints(track ?? []).at(-1) ?? null, [track])
 
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = []
@@ -98,6 +99,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     const first = route[0]
     if (first && first.ref.type === 'track' && route.length > 1 && !manual.some((t) => t.id === first.ref.id)) {
       out.push({ id: first.ref.id, lat: first.lat, lng: first.lng, kind: 'start', label: `${formatTime(first.time)} 出發` })
+    }
+    // 背景定位的最後位置（還沒有停留、也還沒移動時，至少看得到資料有進來）
+    if (lastAuto && !out.some((m) => m.id === lastAuto.id)) {
+      out.push({ id: lastAuto.id, lat: lastAuto.lat, lng: lastAuto.lng, kind: 'checkin', label: `${formatTime(lastAuto.time)} 最後位置` })
     }
     for (const s of stays) {
       out.push({
@@ -130,7 +135,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       })
     }
     return out
-  }, [entries, track, thumbs, route, stays, stayNames])
+  }, [entries, track, thumbs, route, stays, stayNames, lastAuto])
 
   // ── 播放當天行程 ──
   const [playhead, setPlayhead] = useState<GeoPoint | null>(null)
@@ -310,6 +315,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
                 {stats.records} 則紀錄 · {stats.photos} 張照片
               </span>
               {steps && <span>{steps.steps.toLocaleString('en-US')} 步</span>}
+              {lastAuto && <span>背景定位 {formatTime(lastAuto.time)}</span>}
             </div>
           </div>
         </div>
