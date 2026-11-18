@@ -171,8 +171,9 @@
 - [x] Scriptable 小工具（`scriptable/ledger-widget.js`，App 設定頁複製）
 - [x] 時間軸「抵達／離開」、步數顯示
 - [x] 部署：已推到預設分支（App 由 GitHub Actions、照片伺服器由 Cloudflare 自動部署；照片伺服器是否部署成功要使用者按「測試連線」確認）
-- [ ] 使用者執行 automation.sql、產生金鑰（已完成）、設定 Overland／捷徑／Scriptable
-- [ ] 使用者在 iPhone 上實測
+- [x] 使用者執行 automation.sql、產生金鑰、設定 Overland／捷徑（記一筆、記步數）／Scriptable（2026-11-18）
+- [ ] 使用者在 iPhone 上實測一整天：出門的路線與「抵達／離開」、23:55 自動記步數、Overland 耗電、小工具「今天在／路線」切換
+- [ ] （可選）C3 記下位置捷徑；App 名稱改「摳摳手帳」（使用者主畫面已改名，App 內文字要不要改還沒回覆）
 
 ## 第 4 階段：進階
 
