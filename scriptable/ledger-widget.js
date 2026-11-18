@@ -1,4 +1,4 @@
-// 記帳日記 小工具（Scriptable）　版本 2026-11-18.5
+// 記帳日記 小工具（Scriptable）　版本 2026-11-18.6
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -294,6 +294,19 @@ function accessoryWidget(d) {
   return w
 }
 
+// 點小工具 → Scriptable 用 ?open=1 執行這個腳本 → 交給捷徑「打開記帳日記」
+// → 捷徑用 webapp://網址 打開主畫面上的 App（不是 Safari）。
+// 小工具直接設 webapp:// 或 shortcuts:// 網址，實測都只會停在 Scriptable 的腳本列表。
+const OPEN_SHORTCUT = '打開記帳日記'
+const openApp = (args.queryParameters || {}).open === '1'
+if (openApp) {
+  Safari.open('shortcuts://run-shortcut?name=' + encodeURIComponent(OPEN_SHORTCUT))
+  Script.complete()
+} else {
+  await main()
+}
+
+async function main() {
 const family = config.widgetFamily || 'medium'
 const param = String(args.widgetParameter || '').trim()
 const res = await load()
@@ -303,11 +316,7 @@ else if (/一年前|year/i.test(param)) widget = await yearAgoWidget(res.data)
 else if (family.startsWith('accessory')) widget = accessoryWidget(res.data)
 else if (family === 'small') widget = smallWidget(res.data, res.stale)
 else widget = await mediumWidget(res.data, res.stale)
-// 點小工具 → 執行捷徑「打開記帳日記」→ 捷徑用 webapp://網址 打開主畫面上的 App（不是 Safari）。
-// Scriptable 自己開不了 webapp:// 網址（實測會停在 Scriptable），所以要靠捷徑轉一手。
-// APP_URL 沒用到時保留給錯誤訊息參考：APP_URL
-const OPEN_SHORTCUT = '打開記帳日記'
-widget.url = 'shortcuts://run-shortcut?name=' + encodeURIComponent(OPEN_SHORTCUT)
+widget.url = URLScheme.forRunningScript() + '?open=1'
 widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
 
 if (config.runsInWidget || config.runsInAccessoryWidget) {
@@ -318,3 +327,4 @@ if (config.runsInWidget || config.runsInAccessoryWidget) {
   await widget.presentMedium()
 }
 Script.complete()
+}
