@@ -171,17 +171,37 @@ function trackRow(p) {
 
 // ── 背景定位 ──
 
-/** Overland：{locations: [GeoJSON Feature…]} */
-export function overlandPoints(body, tz) {
+/** 時間：ISO 文字、epoch 秒或毫秒，或其他 Date.parse 看得懂的文字 */
+export function parseAnyTime(v) {
+  const iso = parseIsoTime(v)
+  if (iso) return iso
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d{9,13}(\.\d+)?$/.test(v.trim()) ? Number(v) : null
+  if (n != null) return { time: Math.round(n < 1e11 ? n * 1000 : n), offset: null }
+  if (typeof v === 'string') {
+    const t = Date.parse(v)
+    if (Number.isFinite(t)) return { time: t, offset: null }
+  }
+  return null
+}
+
+/** Overland：{locations: [GeoJSON Feature…]}；bad＝看不懂的點（時間或座標格式不對） */
+export function overlandPoints(body, tz, bad = []) {
   const out = []
   for (const f of Array.isArray(body?.locations) ? body.locations : []) {
     const c = f?.geometry?.coordinates
     const props = f?.properties || {}
-    if (!Array.isArray(c)) continue
+    if (!Array.isArray(c)) {
+      bad.push(f)
+      continue
+    }
     const lng = toNumber(c[0])
     const lat = toNumber(c[1])
-    const t = parseIsoTime(props.timestamp)
-    if (!t || !validLatLng(lat, lng)) continue
+    const t = parseAnyTime(props.timestamp)
+    if (!t) {
+      bad.push(f)
+      continue
+    }
+    if (!validLatLng(lat, lng)) continue
     const acc = toNumber(props.horizontal_accuracy)
     if (acc != null && acc < 0) continue // iOS：負的精確度代表這個點無效
     const p = {
@@ -346,8 +366,17 @@ export async function handleAuto(request, env, url) {
     if (request.method === 'POST' && path === 'overland') {
       const info = await keyInfo(env, key)
       const body = await readBody(request)
-      const pts = overlandPoints(body, info.tz)
-      await write(env, key, 'track_points', pts.map(trackRow))
+      const bad = []
+      const pts = overlandPoints(body, info.tz, bad)
+      const saved = await write(env, key, 'track_points', pts.map(trackRow))
+      const total = Array.isArray(body?.locations) ? body.locations.length : 0
+      // 除錯：最近一次收到的內容摘要存在 R2（GET /auto/debug 可以看）
+      if (env.PHOTOS) {
+        const sample = { at: new Date().toISOString(), total, parsed: pts.length, saved, bad: bad.length, keys: Object.keys(body || {}), first: body?.locations?.[0] ?? null, firstBad: bad[0] ?? null }
+        await env.PHOTOS.put(`${info.user_id}/_debug/overland.json`, JSON.stringify(sample), { httpMetadata: { contentType: 'application/json' } }).catch(() => {})
+      }
+      // 全部都看不懂：不回 ok，Overland 會把資料留在手機上，等修好再送（不會遺失）
+      if (total > 0 && pts.length === 0 && bad.length > 0) return json({ result: 'error', error: '看不懂這批資料的格式' }, 422)
       return json({ result: 'ok', saved: pts.length })
     }
 
@@ -397,6 +426,12 @@ export async function handleAuto(request, env, url) {
       if (km != null) data.distanceKm = Math.round(km * 100) / 100
       await write(env, key, 'daily_steps', [{ id: date, updated_at: now, data }])
       return text(`已記下 ${date} 步數 ${data.steps}`)
+    }
+
+    if (request.method === 'GET' && path === 'debug') {
+      const info = await keyInfo(env, key)
+      const obj = env.PHOTOS ? await env.PHOTOS.get(`${info.user_id}/_debug/overland.json`) : null
+      return obj ? new Response(obj.body, { headers: { ...CORS, 'Content-Type': 'application/json; charset=utf-8' } }) : json(null)
     }
 
     if (request.method === 'GET' && path === 'check') {

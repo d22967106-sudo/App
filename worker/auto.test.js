@@ -98,6 +98,13 @@ describe('背景定位格式', () => {
     )
     expect(pts).toEqual([{ time: Date.UTC(2026, 10, 18, 15, 50), date: '2026-11-18', lat: 23.48, lng: 120.449, accuracy: 12 }])
   })
+  it('Overland：時間是 epoch 數字也看得懂；全部看不懂時不回 ok（資料留在手機）', async () => {
+    expect(overlandPoints({ locations: [{ geometry: { coordinates: [120.4, 23.5] }, properties: { timestamp: 1795000000 } }] }, 'Asia/Taipei')[0].time).toBe(1795000000000)
+    const r = await call('/auto/overland', { body: { locations: [{ geometry: { coordinates: [120.4, 23.5] }, properties: { timestamp: '下午4:20' } }] } })
+    expect(r.status).toBe(422)
+    expect((await r.json()).result).not.toBe('ok')
+  })
+
   it('OwnTracks：tst 是秒', () => {
     expect(owntracksPoints({ _type: 'location', lat: 23.5, lon: 120.4, tst: 1795000000, acc: 8, tid: 'me' }, 'Asia/Taipei')).toEqual([
       { time: 1795000000000, date: dateInZone(1795000000000, 'Asia/Taipei'), lat: 23.5, lng: 120.4, accuracy: 8 },

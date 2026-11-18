@@ -162,6 +162,8 @@ export interface AutoReport {
   /** 雲端今天（手機時區）的背景定位點數 */
   cloudTodayCount: number
   sync: { lastSyncAt: number | null; lastError: string | null; pending: number }
+  /** 照片伺服器記下的最近一次 Overland 請求摘要 */
+  overland: { at: string; total: number; parsed: number; saved: number; bad: number; first: unknown; firstBad: unknown } | string | null
 }
 
 export async function autoReport(): Promise<AutoReport> {
@@ -172,6 +174,17 @@ export async function autoReport(): Promise<AutoReport> {
       .then((r) => r.json())
       .catch(() => []),
   ])
+  const cfg = await getConfig()
+  const k = await getAutoKey()
+  let overland: AutoReport['overland'] = null
+  if (cfg?.photoUrl && k) {
+    try {
+      const r = await fetch(`${cfg.photoUrl}/auto/debug`, { headers: { Authorization: `Bearer ${k.key}` } })
+      overland = r.ok ? await r.json() : `照片伺服器：HTTP ${r.status}`
+    } catch {
+      overland = '連不上照片伺服器'
+    }
+  }
   const ids = (await rest(`track_points?select=id,data->time&data->>source=eq.auto&date=gte.${shiftDate(today, -1)}&limit=5000`).then((r) => r.json())) as { time: number }[]
   const cloudTodayCount = ids.filter((x) => toDateKey(Number(x.time)) === today).length
   const t = tr[0] as { data: TrackPoint; server_updated_at: string } | undefined
@@ -188,6 +201,7 @@ export async function autoReport(): Promise<AutoReport> {
       last: local.length ? local[local.length - 1].time : null,
     },
     cloudTodayCount,
+    overland,
     sync: (({ lastSyncAt, lastError, pending }) => ({ lastSyncAt, lastError, pending }))(getSyncStatus()),
   }
 }

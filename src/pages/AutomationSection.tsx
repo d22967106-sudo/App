@@ -260,6 +260,24 @@ function ReportView({ r }: { r: AutoReport }) {
         </span>
       </div>
       {r.sync.lastError && <p className="error-text" style={{ margin: 0 }}>同步錯誤：{r.sync.lastError}</p>}
+      <div className="kv">
+        <span>最近一次 Overland 送來</span>
+        <span>
+          {r.overland == null
+            ? '（新版伺服器還沒收到過）'
+            : typeof r.overland === 'string'
+              ? r.overland
+              : `${formatDateTimeShort(new Date(r.overland.at).getTime())}：${r.overland.total} 點，存入 ${r.overland.parsed} 點`}
+        </span>
+      </div>
+      {r.overland && typeof r.overland === 'object' && (
+        <details>
+          <summary style={{ fontSize: 12 }}>詳細內容（截圖給 Claude）</summary>
+          <pre style={{ fontSize: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-all', margin: 0 }}>
+            {JSON.stringify({ first: r.overland.first, firstBad: r.overland.firstBad, bad: r.overland.bad }, null, 1)}
+          </pre>
+        </details>
+      )}
     </div>
   )
 }
