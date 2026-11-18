@@ -229,7 +229,8 @@ export function shortcutEntry(body, tz, now = Date.now()) {
   const note = String(body.note ?? '').trim()
   const title = String(body.title ?? '').trim()
   let kind = body.kind === 'income' || INCOME_CATEGORIES[catName] ? 'income' : 'expense'
-  if (amount == null || amount === 0) {
+  // 金額空白 → 日記；填 0 → 0 元的帳（例如免費、招待）
+  if (amount == null) {
     if (!note && !title) throw new HttpError('金額和文字都是空的', 400)
     kind = 'diary'
   }

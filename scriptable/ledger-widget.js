@@ -92,6 +92,56 @@ function budgetBar(width, used) {
   return dc.getImage()
 }
 
+const toRad = (d) => (d * Math.PI) / 180
+function distanceM(a, b) {
+  const s = Math.sin(toRad(b[0] - a[0]) / 2) ** 2 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(toRad(b[1] - a[1]) / 2) ** 2
+  return 2 * 6371008.8 * Math.asin(Math.min(1, Math.sqrt(s)))
+}
+
+/** 今天有沒有離開起點 200 公尺以上（沒有就不畫路線，改顯示文字） */
+function moved(route) {
+  return (route || []).some((p) => distanceM(route[0], p) > 200)
+}
+
+/** 目前所在的地名（用 iPhone 內建的地名查詢）；查不到用最後一筆紀錄的地名 */
+async function placeName(d) {
+  const last = d.route && d.route[d.route.length - 1]
+  if (last) {
+    try {
+      const r = (await Location.reverseGeocode(last[0], last[1], 'zh_TW'))[0]
+      const name = [r.subLocality, r.locality].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · ')
+      if (name) return name
+    } catch {
+      /* 查不到就用紀錄的地名 */
+    }
+  }
+  return d.lastPlace ? d.lastPlace.name : ''
+}
+
+/** 還沒移動時：右邊改成文字卡片 */
+function stillCard(stack, size, name, hasRoute) {
+  const card = stack.addStack()
+  card.size = new Size(size, size)
+  card.cornerRadius = 14
+  card.backgroundColor = new Color('#EEDFCC')
+  card.layoutVertically()
+  card.setPadding(10, 10, 10, 10)
+  card.addSpacer()
+  if (hasRoute) {
+    text(card, '今天在', 11, C.sub)
+    const t = card.addText(name || '同一個地方')
+    t.font = Font.boldSystemFont(15)
+    t.textColor = C.text
+    t.lineLimit = 3
+    t.minimumScaleFactor = 0.6
+  } else {
+    const t = card.addText('今天還沒有軌跡')
+    t.font = Font.systemFont(12)
+    t.textColor = C.sub
+  }
+  card.addSpacer()
+}
+
 /** 今天路線縮圖 */
 function routeImage(route, size) {
   const dc = new DrawContext()
@@ -166,7 +216,7 @@ function monthLine(stack, d, width) {
   }
 }
 
-function mediumWidget(d, stale) {
+async function mediumWidget(d, stale) {
   const w = new ListWidget()
   w.backgroundColor = C.bg
   w.setPadding(14, 14, 14, 14)
@@ -183,9 +233,13 @@ function mediumWidget(d, stale) {
   if (d.lastPlace) text(left, `最後 ${hm(d.lastPlace.time)} ${d.lastPlace.name}`, 11, C.sub)
   if (stale) text(left, '（離線，顯示上次資料）', 9, C.sub)
   row.addSpacer()
-  const img = row.addImage(routeImage(d.route, 120))
-  img.imageSize = new Size(120, 120)
-  img.cornerRadius = 14
+  if (moved(d.route)) {
+    const img = row.addImage(routeImage(d.route, 120))
+    img.imageSize = new Size(120, 120)
+    img.cornerRadius = 14
+  } else {
+    stillCard(row, 120, await placeName(d), d.route && d.route.length > 0)
+  }
   return w
 }
 
@@ -248,7 +302,7 @@ if (res.error) widget = errorWidget(res.error)
 else if (/一年前|year/i.test(param)) widget = await yearAgoWidget(res.data)
 else if (family.startsWith('accessory')) widget = accessoryWidget(res.data)
 else if (family === 'small') widget = smallWidget(res.data, res.stale)
-else widget = mediumWidget(res.data, res.stale)
+else widget = await mediumWidget(res.data, res.stale)
 widget.url = APP_URL
 widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
 

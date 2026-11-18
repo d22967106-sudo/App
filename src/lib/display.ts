@@ -18,7 +18,7 @@ export function entrySubtitle(e: Entry): string {
 /** 列表用的短金額：-65、+500；外幣顯示原幣 */
 export function shortAmount(e: Entry): { main: string; twd?: string } | null {
   if (e.amount == null || e.kind === 'diary') return null
-  const sign = e.kind === 'income' ? '+' : '-'
+  const sign = e.amount === 0 ? '' : e.kind === 'income' ? '+' : '-'
   if (e.currency === 'TWD') return { main: `${sign}${formatNumber(e.amount)}` }
   return {
     main: `${sign}${formatCurrency(e.amount, e.currency)}`,
@@ -29,7 +29,7 @@ export function shortAmount(e: Entry): { main: string; twd?: string } | null {
 /** 完整回顧用的金額：-NT$65 */
 export function longAmount(e: Entry): { main: string; twd?: string } | null {
   if (e.amount == null || e.kind === 'diary') return null
-  const sign = e.kind === 'income' ? '+' : '-'
+  const sign = e.amount === 0 ? '' : e.kind === 'income' ? '+' : '-'
   const main = `${sign}${formatCurrency(e.amount, e.currency)}`
   if (e.currency === 'TWD') return { main }
   return { main, twd: e.amountTwd != null ? `≈ ${formatTwd(e.amountTwd)}` : undefined }

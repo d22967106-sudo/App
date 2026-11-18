@@ -81,12 +81,12 @@ export function totalTwd(entries: Entry[], kind: 'expense' | 'income'): number {
   )
 }
 
-/** 解析使用者輸入的金額（最多兩位小數）；不合法回傳 null */
+/** 解析使用者輸入的金額（最多兩位小數，可以是 0）；不合法回傳 null */
 export function parseAmount(input: string): number | null {
   const s = input.replace(/[,\s]/g, '')
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null
   const n = Number(s)
-  return n > 0 && n <= 1e10 ? n : null
+  return n >= 0 && n <= 1e10 ? n : null
 }
 
 /** 依時間排序（舊到新） */

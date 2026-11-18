@@ -151,6 +151,8 @@ describe('接收端', () => {
     expect(shortcutEntry({ amount: 500, category: '退款' }, 'Asia/Taipei')).toMatchObject({ kind: 'income', categoryId: 'refund' })
     expect(shortcutEntry({ amount: 50, category: '飲料' }, 'Asia/Taipei')).toMatchObject({ kind: 'expense', categoryId: 'other' })
     expect(() => shortcutEntry({ amount: '' }, 'Asia/Taipei')).toThrow()
+    expect(shortcutEntry({ amount: 0, category: '餐飲' }, 'Asia/Taipei')).toMatchObject({ kind: 'expense', amount: 0, amountTwd: 0, categoryId: 'food' })
+    expect(shortcutEntry({ amount: '0' }, 'Asia/Taipei')).toMatchObject({ kind: 'expense', amount: 0 })
   })
 
   it('捷徑：步數只會變多（鎖定時讀到 0 不會蓋掉）', async () => {

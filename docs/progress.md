@@ -18,7 +18,7 @@
 
 ## 目前狀態
 
-**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；C2 步數已完成並測試成功；下一步設定 23:55 自動化，然後 D Scriptable（C3 記下位置可選）；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
+**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；C2 步數已完成並測試成功；23:55 自動化已教；D Scriptable 預覽成功（等使用者放到主畫面、重新複製新版腳本）；C3 記下位置可選；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
 
 ### 第 3 階段的做法
 
@@ -36,6 +36,9 @@
   - 捷徑記的帳沒有地名，同步後自動補（每次最多 5 筆）。
   - 設定頁「自動化」區塊（`AutomationSection.tsx`）：複製設定 SQL、產生／重新產生金鑰、測試連線、一鍵設定 Overland、OwnTracks 網址、捷徑要貼的授權與網址、每月預算＋複製 Scriptable 腳本。
 - **Scriptable**：範本 `scriptable/ledger-widget.js`，App 複製時填入網址、金鑰、預算、App 網址。中型（今日支出、本月預算進度、步數、最後地點、今天路線縮圖）、小型（今日支出＋預算；參數「一年前」→ 一年前的今天，有照片就當背景）、鎖定畫面長方形。沒網路時顯示上次的資料。
+- **使用者回饋（2026-11-18）**：
+  - 小工具：今天還沒離開起點 200 公尺時，右邊不畫路線，改顯示「今天在 ○○」（用 Scriptable 的 `Location.reverseGeocode` 查地名，查不到用最後一筆紀錄的地名）；沒有任何軌跡顯示「今天還沒有軌跡」。改了要使用者重新複製腳本貼上。
+  - 0 元也能記帳：App 的金額可以填 0（`parseAmount` 允許 0，列表顯示「0」不加正負號）；捷徑金額填 0 記成 0 元的帳，留空才當日記。
 - **與規劃不同的地方**（技術限制）：iOS 捷徑「特定時間」自動化沒有每小時，「每小時補一個點」改成可選的幾個固定時間；已記在 plan.md。
 - **測試**：`worker/auto.test.js` 15 項（格式解析、金鑰、重送、步數只增不減、小工具資料）；`supabase/automation.sql` 在本機 PostgreSQL 16 模擬 Supabase 的 auth／角色跑過（金鑰驗證、anon 不能直接讀表、不能呼叫 auto_user、不支援的表會拒絕）；停留偵測 4 項、同步 2 項；全部單元測試 88 項。Playwright 模擬 iPhone 13 看過地圖、回顧頁、設定頁；Scriptable 腳本用假的 Scriptable API 跑過中型與「一年前」。
 - **沒辦法在開發環境確認的**：Overland 目前的設定畫面（官方文件網站連不到，只看了 GitHub 上的 README）、捷徑動作的繁中名稱、Scriptable 實機外觀、健康資料在鎖定時能不能讀。
