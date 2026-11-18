@@ -18,7 +18,7 @@
 
 ## 目前狀態
 
-**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；下一步 C2 步數；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
+**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；C2 步數已完成並測試成功；下一步設定 23:55 自動化，然後 D Scriptable（C3 記下位置可選）；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
 
 ### 第 3 階段的做法
 
