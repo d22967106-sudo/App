@@ -388,7 +388,9 @@ export async function handleAuto(request, env, url) {
       const steps = toNumber(body.steps)
       if (steps == null) throw new HttpError('沒有收到步數（steps）', 400)
       const time = shortcutTime(body.time)
-      const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || '') ? body.date : dateInZone(time, info.tz)
+      // date 可以是 YYYY-MM-DD、yesterday（昨天）或不填（今天）：手機鎖定時讀不到健康資料，隔天解鎖時補記昨天
+      const today = dateInZone(time, info.tz)
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(body.date || '') ? body.date : /^(yesterday|昨天)$/i.test(String(body.date || '').trim()) ? shiftDay(today, -1) : today
       const now = Date.now()
       const data = { date, steps: Math.round(steps), updatedAt: now }
       const km = toNumber(body.distance)

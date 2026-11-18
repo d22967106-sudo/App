@@ -159,6 +159,11 @@ describe('接收端', () => {
     await call('/auto/steps', { body: { steps: '8,231', distance: '5.62', date: '2026-11-18' } })
     await call('/auto/steps', { body: { steps: 0, date: '2026-11-18' } })
     expect(sb.tables.daily_steps.get('2026-11-18')).toMatchObject({ date: '2026-11-18', steps: 8231, distanceKm: 5.62 })
+    const r = await call('/auto/steps', { body: { steps: 9000, date: 'yesterday' } })
+    const y = (await r.text()).match(/\d{4}-\d{2}-\d{2}/)[0]
+    const today = dateInZone(Date.now(), 'Asia/Taipei')
+    expect(y < today).toBe(true)
+    expect(sb.tables.daily_steps.get(y)).toMatchObject({ steps: 9000 })
   })
 
   it('捷徑：記下位置', async () => {
