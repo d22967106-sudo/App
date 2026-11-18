@@ -1,4 +1,4 @@
-// 記帳日記 小工具（Scriptable）　版本 2026-11-18.2
+// 記帳日記 小工具（Scriptable）　版本 2026-11-18.3
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -303,7 +303,9 @@ else if (/一年前|year/i.test(param)) widget = await yearAgoWidget(res.data)
 else if (family.startsWith('accessory')) widget = accessoryWidget(res.data)
 else if (family === 'small') widget = smallWidget(res.data, res.stale)
 else widget = await mediumWidget(res.data, res.stale)
-widget.url = APP_URL
+// 「webapp://」加在網址前面，點小工具會打開主畫面上的記帳日記，而不是 Safari
+// （Apple 沒有寫在文件裡，使用者 2026-11-18 在 iPhone 上試過可以）
+widget.url = 'webapp://' + APP_URL
 widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
 
 if (config.runsInWidget || config.runsInAccessoryWidget) {
