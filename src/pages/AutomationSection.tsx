@@ -239,6 +239,10 @@ function ReportView({ r }: { r: AutoReport }) {
         <span>{r.cloudTrack ? `${formatDateTimeShort(r.cloudTrack.time)}（${at(r.cloudTrack.server)} 收到）` : '還沒有'}</span>
       </div>
       <div className="kv">
+        <span>雲端今天的背景定位</span>
+        <span>{r.cloudTodayCount} 點</span>
+      </div>
+      <div className="kv">
         <span>手機上今天的背景定位</span>
         <span>
           {r.localToday.count} 點
@@ -249,6 +253,13 @@ function ReportView({ r }: { r: AutoReport }) {
         <span>雲端最後收到的步數</span>
         <span>{r.cloudSteps ? `${r.cloudSteps.date} ${r.cloudSteps.steps} 步（${at(r.cloudSteps.server)} 收到）` : '還沒有'}</span>
       </div>
+      <div className="kv">
+        <span>同步</span>
+        <span>
+          {r.sync.lastSyncAt ? formatDateTimeShort(r.sync.lastSyncAt) : '還沒同步'}，待上傳 {r.sync.pending} 筆
+        </span>
+      </div>
+      {r.sync.lastError && <p className="error-text" style={{ margin: 0 }}>同步錯誤：{r.sync.lastError}</p>}
     </div>
   )
 }

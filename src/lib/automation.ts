@@ -1,9 +1,9 @@
 import { CloudError, getConfig, getSession, rest } from './cloud'
 import { getAllEntries, getMeta, getTrackByDate, saveEntry, setMeta } from './db'
-import { toDateKey } from './ledger'
+import { shiftDate, toDateKey } from './ledger'
 import type { TrackPoint } from './types'
 import { reverseGeocode } from './geocode'
-import { setAfterSyncHook } from './sync'
+import { getSyncStatus, setAfterSyncHook } from './sync'
 import automationSql from '../../supabase/automation.sql?raw'
 import scriptableTemplate from '../../scriptable/ledger-widget.js?raw'
 
@@ -159,6 +159,9 @@ export interface AutoReport {
   cloudTrack: { time: number; server: string; accuracy?: number } | null
   cloudSteps: { date: string; steps: number; server: string } | null
   localToday: { count: number; minAcc: number | null; maxAcc: number | null; last: number | null }
+  /** 雲端今天（手機時區）的背景定位點數 */
+  cloudTodayCount: number
+  sync: { lastSyncAt: number | null; lastError: string | null; pending: number }
 }
 
 export async function autoReport(): Promise<AutoReport> {
@@ -169,6 +172,8 @@ export async function autoReport(): Promise<AutoReport> {
       .then((r) => r.json())
       .catch(() => []),
   ])
+  const ids = (await rest(`track_points?select=id,data->time&data->>source=eq.auto&date=gte.${shiftDate(today, -1)}&limit=5000`).then((r) => r.json())) as { time: number }[]
+  const cloudTodayCount = ids.filter((x) => toDateKey(Number(x.time)) === today).length
   const t = tr[0] as { data: TrackPoint; server_updated_at: string } | undefined
   const s = st[0] as { id: string; data: { steps: number }; server_updated_at: string } | undefined
   const local = (await getTrackByDate(today)).filter((p) => p.source === 'auto')
@@ -182,6 +187,8 @@ export async function autoReport(): Promise<AutoReport> {
       maxAcc: accs.length ? Math.max(...accs) : null,
       last: local.length ? local[local.length - 1].time : null,
     },
+    cloudTodayCount,
+    sync: (({ lastSyncAt, lastError, pending }) => ({ lastSyncAt, lastError, pending }))(getSyncStatus()),
   }
 }
 
