@@ -42,7 +42,7 @@
   - 設定頁「自動化」多了「檢查雲端收到的資料」：先同步，再顯示雲端最後收到的背景定位／步數（含伺服器收到時間）、手機上今天的背景定位點數與精確度範圍。用來遠端除錯（開發環境連不到 Supabase）。
   - 精確度門檻 100 → 200 公尺（Overland 設 Desired Accuracy 100m，室內可能超過 100）；地圖「最後位置」不看精確度。
   - 2026-11-19 00:43 使用者回報 23:55 步數自動化沒送到（雲端最後是 16:30 手動那筆）。查到手機鎖定時捷徑讀健康資料會失敗（Protected health data is inaccessible），所以改成：`/auto/steps` 的 `date` 可以填 `yesterday`；捷徑每次執行同時送今天和昨天；觸發改成「打開常用 App（LINE／Facebook）時」，那時一定解鎖。教學 C2 已改。
-  - 同時回報背景定位雲端最後一點是 11/18 15:54；但 Overland 畫面顯示 00:49 時 QUEUED 0、LAST SENT 3 分鐘前、最後位置在約 2 km 外 → Overland 有送、伺服器回了 ok，但沒存進雲端（懷疑格式解析失敗被當成無效點，資料可能已遺失）。處理：Worker 把最近一次 Overland 請求摘要存在 R2 `<user>/_debug/overland.json`，`GET /auto/debug` 可讀，App「檢查雲端收到的資料」會顯示；時間格式多支援 epoch 數字與 Date.parse；整批都看不懂時回 422（Overland 會保留資料重送）。待使用者回報 debug 內容。
+  - 同時回報背景定位雲端最後一點是 11/18 15:54；但 Overland 畫面顯示 00:49 時 QUEUED 0、LAST SENT 3 分鐘前、最後位置在約 2 km 外 → Overland 有送、伺服器回了 ok，但沒存進雲端（懷疑格式解析失敗被當成無效點，資料可能已遺失）。處理：Worker 把最近一次 Overland 請求摘要存在 R2 `<user>/_debug/overland.json`，`GET /auto/debug` 可讀，App「檢查雲端收到的資料」會顯示；時間格式多支援 epoch 數字與 Date.parse；整批都看不懂時回 422（Overland 會保留資料重送）。待使用者回報 debug 內容（2026-11-19 01:xx 確認 Worker 已是新版；使用者明天移動後再測）。
   - 金額沒填按儲存＝0 元（輸入框提示本來就是 0）。
   - Scriptable 腳本第一行有版本（`版本 2026-11-18.2`），App 設定頁顯示目前版本（`SCRIPT_VERSION` 從範本讀出），改腳本時要改版本號，使用者才知道要重新貼上。
   - 0 元也能記帳：App 的金額可以填 0（`parseAmount` 允許 0，列表顯示「0」不加正負號）；捷徑金額填 0 記成 0 元的帳，留空才當日記。
