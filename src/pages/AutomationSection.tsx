@@ -10,11 +10,14 @@ import {
   createAutoKey,
   getAutoKey,
   SCRIPT_VERSION,
+  autoReport,
+  type AutoReport,
   type AutoKey,
 } from '../lib/automation'
 import { getConfig, getSession, onCloudChange, type CloudConfig, type CloudSession } from '../lib/cloud'
 import { getMeta, setMeta } from '../lib/db'
 import { formatDateTimeShort } from '../lib/ledger'
+import { syncNow } from '../lib/sync'
 
 const GUIDE_URL = 'https://github.com/d22967106-sudo/App/blob/claude/confident-babbage-8nlxkb/docs/setup-automation.md'
 
@@ -48,6 +51,7 @@ export function AutomationSection() {
   }, [])
   const [busy, setBusy] = useState<'key' | 'check' | null>(null)
   const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [report, setReport] = useState<AutoReport | string | null>(null)
   if (!st) return null
   const { cfg, session, key } = st
 
@@ -76,6 +80,16 @@ export function AutomationSection() {
       setResult({ ok: false, text: (e as Error).message })
     } finally {
       setBusy(null)
+    }
+  }
+
+  const check = async () => {
+    setReport('查詢中…')
+    try {
+      await syncNow()
+      setReport(await autoReport())
+    } catch (e) {
+      setReport((e as Error).message)
     }
   }
 
@@ -130,6 +144,12 @@ export function AutomationSection() {
               背景定位 App、捷徑、小工具都用這把金鑰把資料送進來（等同密碼，不要給別人）。
             </p>
           )}
+          {key && (
+            <button className="btn-text" onClick={check}>
+              檢查雲端收到的資料
+            </button>
+          )}
+          {report && (typeof report === 'string' ? <p className="muted" style={{ fontSize: 13, margin: 0 }}>{report}</p> : <ReportView r={report} />)}
           {result && (
             <p className={result.ok ? 'hint' : 'error-text'} role={result.ok ? 'status' : 'alert'} style={{ margin: 0 }}>
               {result.text}
@@ -207,5 +227,28 @@ export function AutomationSection() {
         </>
       )}
     </section>
+  )
+}
+
+function ReportView({ r }: { r: AutoReport }) {
+  const at = (iso: string) => formatDateTimeShort(new Date(iso).getTime())
+  return (
+    <div className="stack" style={{ gap: 4, fontSize: 13 }}>
+      <div className="kv">
+        <span>雲端最後收到的背景定位</span>
+        <span>{r.cloudTrack ? `${formatDateTimeShort(r.cloudTrack.time)}（${at(r.cloudTrack.server)} 收到）` : '還沒有'}</span>
+      </div>
+      <div className="kv">
+        <span>手機上今天的背景定位</span>
+        <span>
+          {r.localToday.count} 點
+          {r.localToday.minAcc != null && `，精確度 ${r.localToday.minAcc}～${r.localToday.maxAcc} 公尺`}
+        </span>
+      </div>
+      <div className="kv">
+        <span>雲端最後收到的步數</span>
+        <span>{r.cloudSteps ? `${r.cloudSteps.date} ${r.cloudSteps.steps} 步（${at(r.cloudSteps.server)} 收到）` : '還沒有'}</span>
+      </div>
+    </div>
   )
 }

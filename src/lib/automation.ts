@@ -1,5 +1,7 @@
 import { CloudError, getConfig, getSession, rest } from './cloud'
-import { getAllEntries, getMeta, saveEntry, setMeta } from './db'
+import { getAllEntries, getMeta, getTrackByDate, saveEntry, setMeta } from './db'
+import { toDateKey } from './ledger'
+import type { TrackPoint } from './types'
 import { reverseGeocode } from './geocode'
 import { setAfterSyncHook } from './sync'
 import automationSql from '../../supabase/automation.sql?raw'
@@ -149,6 +151,38 @@ export async function checkAuto(workerUrl: string, key: string): Promise<string>
   if (res.status === 404 && !/金鑰|SQL/.test(text)) throw new Error('照片伺服器還沒更新到有自動化功能的版本')
   if (!res.ok) throw new Error(text || `HTTP ${res.status}`)
   return text
+}
+
+// ── 檢查：雲端最近收到什麼 ──
+
+export interface AutoReport {
+  cloudTrack: { time: number; server: string; accuracy?: number } | null
+  cloudSteps: { date: string; steps: number; server: string } | null
+  localToday: { count: number; minAcc: number | null; maxAcc: number | null; last: number | null }
+}
+
+export async function autoReport(): Promise<AutoReport> {
+  const today = toDateKey(new Date())
+  const [tr, st] = await Promise.all([
+    rest('track_points?select=data,server_updated_at&data->>source=eq.auto&order=server_updated_at.desc&limit=1').then((r) => r.json()),
+    rest('daily_steps?select=id,data,server_updated_at&order=server_updated_at.desc&limit=1')
+      .then((r) => r.json())
+      .catch(() => []),
+  ])
+  const t = tr[0] as { data: TrackPoint; server_updated_at: string } | undefined
+  const s = st[0] as { id: string; data: { steps: number }; server_updated_at: string } | undefined
+  const local = (await getTrackByDate(today)).filter((p) => p.source === 'auto')
+  const accs = local.map((p) => p.accuracy).filter((a): a is number => a != null)
+  return {
+    cloudTrack: t ? { time: t.data.time, server: t.server_updated_at, accuracy: t.data.accuracy } : null,
+    cloudSteps: s ? { date: s.id, steps: s.data.steps, server: s.server_updated_at } : null,
+    localToday: {
+      count: local.length,
+      minAcc: accs.length ? Math.min(...accs) : null,
+      maxAcc: accs.length ? Math.max(...accs) : null,
+      last: local.length ? local[local.length - 1].time : null,
+    },
+  }
 }
 
 // ── 同步後的善後：捷徑記的帳補上地名 ──

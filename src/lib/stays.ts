@@ -11,7 +11,7 @@ import type { GeoPoint, TrackPoint } from './types'
 export const STAY_RADIUS = 150
 export const STAY_MIN_MS = 10 * 60 * 1000
 /** 精確度比這個差（公尺）的點不用 */
-export const MAX_ACCURACY = 100
+export const MAX_ACCURACY = 200
 
 export interface Stay extends GeoPoint {
   id: string

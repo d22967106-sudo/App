@@ -13,7 +13,7 @@ import { getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
-import { isAuto, usableAutoPoints } from '../lib/stays'
+import { isAuto } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
@@ -89,7 +89,8 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const stayNames = useStayNames(stays, entries)
   const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? [], stays), [entries, track, stays])
   const stats = useMemo(() => dayStats(entries ?? [], track ?? [], stays), [entries, track, stays])
-  const lastAuto = useMemo(() => usableAutoPoints(track ?? []).at(-1) ?? null, [track])
+  // 最後位置不管精確度，只要有收到就標出來（看得出資料有進來）
+  const lastAuto = useMemo(() => (track ?? []).filter(isAuto).sort((a, b) => a.time - b.time).at(-1) ?? null, [track])
 
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = []

@@ -294,7 +294,7 @@ export function buildWidget({ date, entries, track, steps, yearAgo }) {
   const expense = (list) => list.filter((e) => e.kind === 'expense')
   const route = thinRoute(
     [
-      ...track.filter((p) => p.accuracy == null || p.accuracy <= 100).map((p) => ({ time: p.time, lat: p.lat, lng: p.lng })),
+      ...track.filter((p) => p.accuracy == null || p.accuracy <= 200).map((p) => ({ time: p.time, lat: p.lat, lng: p.lng })),
       ...today.filter((e) => e.location).map((e) => ({ time: e.time, lat: e.location.lat, lng: e.location.lng })),
     ].sort((a, b) => a.time - b.time),
   ).map((p) => [Math.round(p.lat * 1e5) / 1e5, Math.round(p.lng * 1e5) / 1e5])

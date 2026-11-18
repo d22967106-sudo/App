@@ -39,6 +39,9 @@
 - **使用者回饋（2026-11-18）**：
   - 小工具：今天還沒離開起點 200 公尺時，右邊不畫路線，改顯示「今天在 ○○」（用 Scriptable 的 `Location.reverseGeocode` 查地名，查不到用最後一筆紀錄的地名）；沒有任何軌跡顯示「今天還沒有軌跡」。改了要使用者重新複製腳本貼上。
   - 點小工具打開主畫面的 App（不是 Safari）：捷徑「打開 URL」`webapp://d22967106-sudo.github.io/App/` 可以打開 App（Apple 沒有文件，網友回報、使用者實測；含 https:// 的寫法不行）。但 Scriptable 的 `widget.url` 和小工具設定的 Open URL 用 webapp:// 或 shortcuts:// 都會停在 Scriptable，所以腳本改成 `widget.url = URLScheme.forRunningScript() + '?open=1'`（Scriptable 自己的網址一定開得了），腳本收到 `open=1` 就 `Safari.open('shortcuts://run-shortcut?name=打開記帳日記')`，由捷徑（內容：打開 URL webapp://…）打開 App。使用者要建立同名捷徑。腳本版本 2026-11-18.6，使用者實測成功（Scriptable → 捷徑 → App）。也試過在 Scriptable 腳本裡直接 `Safari.open('webapp://…')`：沒反應，所以無法省掉捷徑那一跳；完全不經過 Scriptable 只有原生 App 小工具做得到（需要 Mac＋付費帳號，不在前提內）。
+  - 設定頁「自動化」多了「檢查雲端收到的資料」：先同步，再顯示雲端最後收到的背景定位／步數（含伺服器收到時間）、手機上今天的背景定位點數與精確度範圍。用來遠端除錯（開發環境連不到 Supabase）。
+  - 精確度門檻 100 → 200 公尺（Overland 設 Desired Accuracy 100m，室內可能超過 100）；地圖「最後位置」不看精確度。
+  - 2026-11-19 00:3x 使用者回報：Overland 送了 3 次仍看不到最後位置、23:55 步數自動化沒執行（設了鎖定也能執行）。待「檢查雲端收到的資料」結果。
   - 金額沒填按儲存＝0 元（輸入框提示本來就是 0）。
   - Scriptable 腳本第一行有版本（`版本 2026-11-18.2`），App 設定頁顯示目前版本（`SCRIPT_VERSION` 從範本讀出），改腳本時要改版本號，使用者才知道要重新貼上。
   - 0 元也能記帳：App 的金額可以填 0（`parseAmount` 允許 0，列表顯示「0」不加正負號）；捷徑金額填 0 記成 0 元的帳，留空才當日記。
