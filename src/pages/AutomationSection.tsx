@@ -9,6 +9,7 @@ import {
   checkAuto,
   createAutoKey,
   getAutoKey,
+  SCRIPT_VERSION,
   type AutoKey,
 } from '../lib/automation'
 import { getConfig, getSession, onCloudChange, type CloudConfig, type CloudSession } from '../lib/cloud'
@@ -196,6 +197,9 @@ export function AutomationSection() {
                     label="複製 Scriptable 腳本"
                     what="小工具腳本"
                   />
+                  <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+                    腳本版本 {SCRIPT_VERSION}（Scriptable 裡腳本第一行會寫版本，不一樣就重新複製貼上）
+                  </p>
                 </div>
               </details>
             </>

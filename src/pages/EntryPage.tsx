@@ -185,7 +185,8 @@ export function EntryPage({ id, date }: Props) {
     }
   }
 
-  const amount = parseAmount(amountText)
+  // 金額沒填就當 0 元（輸入框的提示本來就顯示 0）
+  const amount = amountText.trim() === '' ? 0 : parseAmount(amountText)
   const amountTwd = amount != null && rate > 0 ? toTwd(amount, rate) : null
   const info = currencyInfo(currency)
   const cats = categoriesFor(kind)
@@ -358,7 +359,7 @@ export function EntryPage({ id, date }: Props) {
   async function save() {
     setError('')
     if (kind !== 'diary' && amount == null) {
-      setError('請輸入金額')
+      setError('金額格式不對（最多兩位小數）')
       return
     }
     if (kind !== 'diary' && !(rate > 0)) {

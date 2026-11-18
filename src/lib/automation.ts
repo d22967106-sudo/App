@@ -124,6 +124,9 @@ export function appUrl(): string {
   return new URL(import.meta.env.BASE_URL, location.origin).href
 }
 
+/** 腳本範本第一行寫的版本（改腳本時記得改版本，使用者才知道要重新貼上） */
+export const SCRIPT_VERSION = /版本\s*(\S+)/.exec(scriptableTemplate)?.[1] ?? '?'
+
 /** 產生 Scriptable 腳本：把網址、金鑰、每月預算填進範本 */
 export function buildScriptable(opts: { workerUrl: string; key: string; budget: number; appUrl: string }): string {
   const base = opts.workerUrl.replace(/\/+$/, '') + '/auto'
