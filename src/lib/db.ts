@@ -1,9 +1,10 @@
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb'
-import type { DailySummary, Entry, Photo, Place, RateCache, TrackPoint } from './types'
+import { toDateKey } from './ledger'
+import type { DailySteps, DailySummary, Entry, Photo, Place, RateCache, TrackPoint } from './types'
 
 /** 會同步到雲端的資料表 */
-export type SyncTable = 'entries' | 'summaries' | 'track' | 'places' | 'photos'
-export const SYNC_TABLES: SyncTable[] = ['entries', 'summaries', 'track', 'places', 'photos']
+export type SyncTable = 'entries' | 'summaries' | 'track' | 'places' | 'photos' | 'steps'
+export const SYNC_TABLES: SyncTable[] = ['entries', 'summaries', 'track', 'places', 'photos', 'steps']
 
 /** 待上傳佇列：只記「哪一筆改過」，上傳時再讀最新內容；本地已不存在就當成刪除 */
 export interface OutboxItem {
@@ -31,6 +32,7 @@ interface LedgerDB extends DBSchema {
   track: { key: string; value: TrackPoint; indexes: { date: string } }
   photos: { key: string; value: Photo; indexes: { entryId: string } }
   places: { key: string; value: Place }
+  steps: { key: string; value: DailySteps }
   meta: { key: string; value: unknown }
   outbox: { key: string; value: OutboxItem }
   displayCache: { key: string; value: DisplayCacheItem; indexes: { lastAccess: number } }
@@ -39,7 +41,7 @@ interface LedgerDB extends DBSchema {
 export type StoreName = StoreNames<LedgerDB>
 
 const DB_NAME = 'ledger-diary'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 let dbPromise: Promise<IDBPDatabase<LedgerDB>> | null = null
 
@@ -65,7 +67,7 @@ export function getDB(): Promise<IDBPDatabase<LedgerDB>> {
         if (oldVersion >= 1) {
           const now = Date.now()
           const outbox = tx.objectStore('outbox')
-          for (const table of SYNC_TABLES) {
+          for (const table of ['entries', 'summaries', 'track', 'places', 'photos'] as const) {
             tx.objectStore(table)
               .getAllKeys()
               .then((keys) => {
@@ -73,6 +75,9 @@ export function getDB(): Promise<IDBPDatabase<LedgerDB>> {
               })
           }
         }
+      }
+      if (oldVersion < 3) {
+        db.createObjectStore('steps', { keyPath: 'date' })
       }
     },
   })
@@ -222,6 +227,12 @@ export async function deleteTrackPoint(id: string): Promise<void> {
   flushOutboxSignal()
 }
 
+// ── 步數 ──
+
+export async function getSteps(date: string): Promise<DailySteps | undefined> {
+  return (await getDB()).get('steps', date)
+}
+
 // ── 照片 ──
 
 export async function getPhoto(id: string): Promise<Photo | undefined> {
@@ -265,6 +276,7 @@ export async function dumpAll() {
     track: await db.getAll('track'),
     places: await db.getAll('places'),
     photos: await db.getAll('photos'),
+    steps: await db.getAll('steps'),
   }
 }
 
@@ -274,9 +286,10 @@ export async function restoreAll(data: {
   track: TrackPoint[]
   places: Place[]
   photos: Photo[]
+  steps?: DailySteps[]
 }): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction(['entries', 'summaries', 'track', 'places', 'photos', 'outbox'], 'readwrite') as unknown as AnyTx
+  const tx = db.transaction(['entries', 'summaries', 'track', 'places', 'photos', 'steps', 'outbox'], 'readwrite') as unknown as AnyTx
   for (const e of data.entries) {
     await tx.objectStore('entries').put(e)
     await queue(tx, 'entries', e.id)
@@ -296,6 +309,10 @@ export async function restoreAll(data: {
   for (const p of data.photos) {
     await tx.objectStore('photos').put(p)
     await queue(tx, 'photos', p.id)
+  }
+  for (const s of data.steps ?? []) {
+    await tx.objectStore('steps').put(s)
+    await queue(tx, 'steps', s.date)
   }
   await tx.done
   notify()
@@ -343,6 +360,7 @@ export function localVersion(table: SyncTable, rec: unknown): number {
   switch (table) {
     case 'entries':
     case 'summaries':
+    case 'steps':
       return r.updatedAt ?? 0
     case 'places':
       return r.updatedAt ?? r.lastVisit ?? 0
@@ -393,13 +411,23 @@ export async function applyRemote(table: SyncTable, rows: RemoteRow[]): Promise<
       continue
     }
     if (!local || row.updated_at > localVersion(table, local)) {
-      await store.put(row.data as never)
+      await store.put(withLocalDate(table, row.data) as never)
       changed++
     }
   }
   await tx.done
   if (changed) notify()
   return { changed, needThumb }
+}
+
+/**
+ * 背景定位與捷徑的資料是伺服器算的日期（用金鑰設定的時區），
+ * 在手機上改用這支手機的時區重新算，跟 App 自己記的資料一致。
+ */
+export function withLocalDate(table: SyncTable, data: Record<string, unknown>): Record<string, unknown> {
+  const auto = (table === 'track' && data.source === 'auto') || (table === 'entries' && data.source === 'shortcut')
+  if (!auto || typeof data.time !== 'number') return data
+  return { ...data, date: toDateKey(data.time) }
 }
 
 /** 照片上傳完成：標記已上傳，顯示版移到暫存（不再永久佔手機空間） */

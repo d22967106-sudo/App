@@ -46,6 +46,8 @@ export interface Entry {
   placeId: string | null
   createdAt: number
   updatedAt: number
+  /** 從捷徑「快速記一筆」送來的（地名之後由 App 補上） */
+  source?: 'shortcut'
 }
 
 /** 每日總結：不屬於任何時間點，固定顯示在當天最上面 */
@@ -58,7 +60,16 @@ export interface DailySummary {
 
 export type MoodId = 'great' | 'good' | 'okay' | 'tired' | 'sad'
 
-/** 軌跡點：第 1 階段只有手動定位；之後背景定位也寫在這裡 */
+/** 每日步數（捷徑每晚從健康 App 讀出來送到雲端） */
+export interface DailySteps {
+  date: string
+  steps: number
+  /** 步行＋跑步距離（公里） */
+  distanceKm?: number
+  updatedAt: number
+}
+
+/** 軌跡點：checkin＝舊版手動定位；auto＝背景定位 App（Overland／OwnTracks）或捷徑送來的 */
 export interface TrackPoint {
   id: string
   time: number

@@ -4,12 +4,13 @@ import { MapView, type MapMarker } from '../components/MapView'
 import { PhotoImg, PhotoViewer, toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
-import { buildRoute, buildTimeline, dayStats } from '../lib/day'
-import { deleteTrackPoint, getEntriesByDate, getMeta, getSummary, getTrackByDate, saveSummary } from '../lib/db'
+import { buildRoute, buildTimeline, dayStats, dayStays } from '../lib/day'
+import { deleteTrackPoint, getEntriesByDate, getMeta, getSteps, getSummary, getTrackByDate, saveSummary } from '../lib/db'
 import { entryTitle, longAmount } from '../lib/display'
 import { goBack, navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, toDateKey } from '../lib/ledger'
 import { MOODS, getMood } from '../lib/moods'
+import { useStayNames } from '../lib/stayNames'
 import type { DailySummary, GeoPoint, MoodId } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
@@ -19,26 +20,34 @@ export function DayPage({ date: rawDate }: { date: string }) {
   const entries = useLiveQuery(() => getEntriesByDate(date), [date])
   const track = useLiveQuery(() => getTrackByDate(date), [date])
   const summary = useLiveQuery(() => getSummary(date), [date])
+  const steps = useLiveQuery(() => getSteps(date), [date])
   const lastPos = useLiveQuery(() => getMeta<GeoPoint>('lastPos'), [])
   const [viewer, setViewer] = useState<{ ids: string[]; start: number } | null>(null)
 
   const route = useMemo(() => buildRoute(entries ?? [], track ?? []), [entries, track])
-  const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? []), [entries, track])
-  const stats = useMemo(() => dayStats(entries ?? [], track ?? []), [entries, track])
-  const markers = useMemo<MapMarker[]>(
-    () =>
-      route.map((p, i) => ({
-        id: p.ref.id,
-        lat: p.lat,
-        lng: p.lng,
-        kind: i === 0 && p.ref.type === 'track' && route.length > 1 ? 'start' : 'checkin',
-        label: formatTime(p.time),
-      })),
-    [route],
-  )
+  const stays = useMemo(() => dayStays(track ?? []), [track])
+  const stayNames = useStayNames(stays, entries)
+  const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? [], stays), [entries, track, stays])
+  const stats = useMemo(() => dayStats(entries ?? [], track ?? [], stays), [entries, track, stays])
+  // 背景定位的點很多：只標起點、停留、手動定位與紀錄
+  const markers = useMemo<MapMarker[]>(() => {
+    const out: MapMarker[] = []
+    const first = route[0]
+    if (first && route.length > 1)
+      out.push({ id: first.ref.id, lat: first.lat, lng: first.lng, kind: first.ref.type === 'track' ? 'start' : 'checkin', label: formatTime(first.time) })
+    for (const s of stays) out.push({ id: s.id, lat: s.lat, lng: s.lng, kind: 'checkin', label: formatTime(s.start) })
+    for (const t of track ?? [])
+      if (t.source !== 'auto' && t.id !== first?.ref.id) out.push({ id: t.id, lat: t.lat, lng: t.lng, kind: 'checkin', label: formatTime(t.time) })
+    for (const e of entries ?? [])
+      if (e.location && e.id !== first?.ref.id) out.push({ id: e.id, lat: e.location.lat, lng: e.location.lng, kind: 'checkin', label: formatTime(e.time) })
+    return out
+  }, [route, stays, track, entries])
 
   const share = async () => {
-    const lines = [`${formatDateLong(date)}`, `支出 ${formatTwd(stats.expense)} · ${stats.km} km · ${stats.places} 個地點`]
+    const lines = [
+      `${formatDateLong(date)}`,
+      `支出 ${formatTwd(stats.expense)} · ${stats.km} km · ${stats.places} 個地點${steps ? ` · ${steps.steps.toLocaleString('en-US')} 步` : ''}`,
+    ]
     if (summary?.text) lines.push('', summary.text)
     for (const item of timeline) {
       if (item.type === 'entry') {
@@ -98,6 +107,11 @@ export function DayPage({ date: rawDate }: { date: string }) {
             <span>
               地點 <strong>{stats.places}</strong>
             </span>
+            {steps && (
+              <span>
+                步數 <strong>{steps.steps.toLocaleString('en-US')}</strong>
+              </span>
+            )}
           </div>
         </div>
 
@@ -107,6 +121,17 @@ export function DayPage({ date: rawDate }: { date: string }) {
 
         <ol className="tl" aria-label="時間軸">
           {timeline.map((item) => {
+            if (item.type === 'stay') {
+              return (
+                <li key={`${item.stay.id}-${item.edge}`} className="tl-track">
+                  <span className="dot small" />
+                  <span>{formatTime(item.time)}</span>
+                  <span>
+                    {item.edge === 'arrive' ? '抵達' : '離開'} {stayNames[item.stay.id] ?? '…'}
+                  </span>
+                </li>
+              )
+            }
             if (item.type === 'track') {
               const p = item.point
               return (

@@ -45,9 +45,13 @@ export const REMOTE_TABLE: Record<SyncTable, string> = {
   track: 'track_points',
   places: 'places',
   photos: 'photos',
+  steps: 'daily_steps',
 }
 
 const PAGE = 500
+
+/** 雲端可能還沒建立的表（下載失敗就跳過） */
+const OPTIONAL_TABLES = new Set<SyncTable>(['steps'])
 
 /** 送到雲端的內容（照片不含圖檔本身） */
 export function toRemoteData(table: SyncTable, rec: unknown): Record<string, unknown> {
@@ -167,9 +171,16 @@ async function pull(userId: string): Promise<string[]> {
     let cursor = (await getMeta<string>(cursorKey)) ?? null
     for (;;) {
       const filter = cursor ? `&server_updated_at=gt.${encodeURIComponent(cursor)}` : ''
-      const res = await rest(
-        `${REMOTE_TABLE[table]}?select=id,updated_at,deleted,data,server_updated_at${filter}&order=server_updated_at.asc&limit=${PAGE}`,
-      )
+      let res: Response
+      try {
+        res = await rest(
+          `${REMOTE_TABLE[table]}?select=id,updated_at,deleted,data,server_updated_at${filter}&order=server_updated_at.asc&limit=${PAGE}`,
+        )
+      } catch (e) {
+        // 步數表是第 3 階段才有的：還沒執行 automation.sql 就先跳過，不影響其他資料同步
+        if (OPTIONAL_TABLES.has(table) && e instanceof CloudError && (e.status === 404 || /找不到資料表/.test(e.message))) break
+        throw e
+      }
       const rows = (await res.json()) as (RemoteRow & { server_updated_at: string })[]
       if (!rows.length) break
       const r = await applyRemote(table, rows)
@@ -232,6 +243,7 @@ async function syncOnce(): Promise<void> {
       const missing = new Set([...needThumb, ...(await photosMissingThumb())])
       await downloadThumbs([...missing])
     }
+    await afterSync()
     const now = Date.now()
     await setMeta('sync.lastAt', now)
     setStatus({ lastSyncAt: now, lastError: null, photosPaused })
@@ -240,6 +252,19 @@ async function syncOnce(): Promise<void> {
     setStatus({ lastError: e instanceof CloudError ? e.message : `同步失敗：${(e as Error).message}`, needLogin })
   } finally {
     setStatus({ running: false, pending: await countOutbox() })
+  }
+}
+
+// 自動化的善後工作（補地名、更新時區）由 automation.ts 註冊，避免互相 import
+let afterSyncHook: (() => Promise<void>) | null = null
+export function setAfterSyncHook(fn: () => Promise<void>): void {
+  afterSyncHook = fn
+}
+async function afterSync() {
+  try {
+    await afterSyncHook?.()
+  } catch {
+    /* 補地名失敗不算同步失敗，下次再補 */
   }
 }
 

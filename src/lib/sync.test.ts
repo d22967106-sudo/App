@@ -17,6 +17,8 @@ class FakeCloud {
   calls: string[] = []
   seq = 0
   users = new Map<string, string>([['me@x.tw', 'secret123']])
+  /** 模擬還沒執行 automation.sql */
+  missing = new Set<string>()
 
   issue(user: string) {
     const a = `at${++this.seq}`
@@ -62,6 +64,7 @@ class FakeCloud {
     if (url.host === 'proj.supabase.co' && url.pathname.startsWith('/rest/v1/')) {
       if (!user) return json({ message: 'JWT expired' }, 401)
       const table = url.pathname.slice(9)
+      if (this.missing.has(table)) return json({ message: `relation "public.${table}" does not exist` }, 404)
       if (method === 'POST') {
         for (const r of JSON.parse(String(init.body)) as Record<string, unknown>[]) {
           const key = `${table}|${r.user_id}|${r.id}`
@@ -284,5 +287,31 @@ describe('雲端同步', () => {
     expect(await db.cacheGet('b')).toBeUndefined()
     expect(await db.cacheGet('a')).toBeDefined()
     expect(await db.cacheGet('c')).toBeDefined()
+  })
+
+  it('背景定位、捷徑、步數從雲端同步下來；日期用手機的時區重新算', async () => {
+    await login()
+    const t = new Date(2026, 10, 18, 0, 30).getTime() // 手機時區的 11/18 00:30
+    const put = (table: string, id: string, data: Record<string, unknown>) =>
+      cloud.rows.set(`${table}|me|${id}`, { user_id: 'me', id, updated_at: 1, deleted: false, data, server_updated_at: `2026-01-01T00:00:01.${String(++cloud.clock).padStart(6, '0')}+00:00` })
+    put('track_points', `auto-${t}`, { id: `auto-${t}`, time: t, date: '1999-01-01', lat: 23.4, lng: 120.4, source: 'auto' })
+    put('entries', 'sc-1', { ...entry('sc-1', { time: t, date: '1999-01-01' }), source: 'shortcut' })
+    put('entries', 'e-own', { ...entry('e-own', { time: t, date: '2026-11-17' }) })
+    put('daily_steps', '2026-11-18', { date: '2026-11-18', steps: 8231, updatedAt: 1 })
+    await syncNow()
+    expect(getSyncStatus().lastError).toBeNull()
+    expect((await db.getTrackByDate('2026-11-18')).map((p) => p.id)).toEqual([`auto-${t}`])
+    expect((await db.getEntriesByDate('2026-11-18')).map((e) => e.id)).toEqual(['sc-1'])
+    expect((await db.getEntry('e-own'))?.date).toBe('2026-11-17') // App 自己記的不動
+    expect(await db.getSteps('2026-11-18')).toMatchObject({ steps: 8231 })
+  })
+
+  it('雲端還沒建立步數表時，其他資料照常同步', async () => {
+    cloud.missing.add('daily_steps')
+    await login()
+    await db.saveEntry(entry('e1'))
+    await syncNow()
+    expect(getSyncStatus().lastError).toBeNull()
+    expect(cloud.table('entries')).toHaveLength(1)
   })
 })

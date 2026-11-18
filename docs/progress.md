@@ -1,6 +1,6 @@
 # 進度
 
-最後更新：2026-11-17（第 2 階段完成，使用者已在 iPhone 實測確認）
+最後更新：2026-11-18（第 3 階段程式完成，等使用者在 iPhone 設定與實測）
 
 ## ⚠️ 給接手者的教訓（使用者特別交代，務必銘記）
 
@@ -17,6 +17,29 @@
 4. 一次只給一小段步驟，並說明「成功時會看到什麼」，讓使用者能自己判斷有沒有做對。
 
 ## 目前狀態
+
+**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`。下一步：部署（App 與照片伺服器）→ 使用者照 `docs/setup-automation.md` 一步一步設定並實測。**
+
+### 第 3 階段的做法
+
+- **認證**：背景定位 App、捷徑、小工具不能用帳號密碼，改用 App 產生的「自動化金鑰」（`ld_` 開頭、32 bytes 亂數）。Supabase 的 `api_keys` 只存 sha256 雜湊＋時區；金鑰本身存在手機 meta `auto.key`。每人一把，重新產生舊的就失效。
+- **接收端**：掛在照片伺服器同一個 Worker（`worker/auto.js`，由 `photos.js` 轉給 `/auto/…`）。Worker 帶著金鑰用 publishable key 呼叫 Supabase 的 `auto_key_info`／`auto_write`／`auto_read`（`supabase/automation.sql`，security definer，只能碰固定幾張表）→ **不需要 service role key 或任何秘密**，Cloudflare 後台不用加設定。
+  - `POST /auto/overland`（Bearer 金鑰，回 `{"result":"ok"}`，其他回應 Overland 會保留下次重送）、`POST /auto/owntracks`（Basic 密碼或 `?key=`，回 `[]`）、`POST /auto/location`、`POST /auto/entry`、`POST /auto/steps`、`GET /auto/widget?date=`、`GET /auto/photo/<id>`（小工具用縮圖）、`GET /auto/check`。
+  - 軌跡點 id＝`auto-<毫秒>`，重送不會重複；步數只會變多（鎖定時讀到 0 不會蓋掉）。
+  - 日期：Overland 的時間字串有時區就用它；其他用 `api_keys.tz`（App 每次同步後發現時區變了就更新）。手機同步下來時，`source:'auto'` 的軌跡點與 `source:'shortcut'` 的紀錄會用手機時區重算 `date`（`withLocalDate`）。
+- **Overland 一鍵設定**：App 產生 `overland://setup?url=…&token=…&device_id=iphone`（Overland README 記載的設定網址）。
+- **App 端**：
+  - IndexedDB 升到第 3 版：新增 `steps`（每日步數，對應雲端 `daily_steps`）。雲端還沒建這張表時下載會跳過，不影響其他同步。備份 zip 多了 `steps`（舊備份沒有也能匯入）。
+  - 時間軸與地圖（`src/lib/stays.ts`、`day.ts`）：背景定位的點不逐一列出，精確度 > 100 m 的點不用；路線去掉小於精確度（至少 25 m）的飄移；150 m 內待超過 10 分鐘＝停留 → 時間軸顯示灰字「抵達／離開 ○○」，地圖只標起點和停留。地點數＝停留＋手動定位＋有地點的紀錄。
+  - 停留的名稱（`stayNames.ts`）：附近的紀錄（記過的店名或地名）→ 記住去過的店 → 手機上的快取（meta `stay.names`）→ Nominatim。
+  - 捷徑記的帳沒有地名，同步後自動補（每次最多 5 筆）。
+  - 設定頁「自動化」區塊（`AutomationSection.tsx`）：複製設定 SQL、產生／重新產生金鑰、測試連線、一鍵設定 Overland、OwnTracks 網址、捷徑要貼的授權與網址、每月預算＋複製 Scriptable 腳本。
+- **Scriptable**：範本 `scriptable/ledger-widget.js`，App 複製時填入網址、金鑰、預算、App 網址。中型（今日支出、本月預算進度、步數、最後地點、今天路線縮圖）、小型（今日支出＋預算；參數「一年前」→ 一年前的今天，有照片就當背景）、鎖定畫面長方形。沒網路時顯示上次的資料。
+- **與規劃不同的地方**（技術限制）：iOS 捷徑「特定時間」自動化沒有每小時，「每小時補一個點」改成可選的幾個固定時間；已記在 plan.md。
+- **測試**：`worker/auto.test.js` 15 項（格式解析、金鑰、重送、步數只增不減、小工具資料）；`supabase/automation.sql` 在本機 PostgreSQL 16 模擬 Supabase 的 auth／角色跑過（金鑰驗證、anon 不能直接讀表、不能呼叫 auto_user、不支援的表會拒絕）；停留偵測 4 項、同步 2 項；全部單元測試 88 項。Playwright 模擬 iPhone 13 看過地圖、回顧頁、設定頁；Scriptable 腳本用假的 Scriptable API 跑過中型與「一年前」。
+- **沒辦法在開發環境確認的**：Overland 目前的設定畫面（官方文件網站連不到，只看了 GitHub 上的 README）、捷徑動作的繁中名稱、Scriptable 實機外觀、健康資料在鎖定時能不能讀。
+
+### 第 2 階段（已完成）
 
 **第 2 階段完成（2026-11-17），使用者已在 iPhone 實測：同步、照片上傳到 R2、大圖從雲端下載、離線補傳、刪除同步都正常。下一步：第 3 階段「自動化」，開新的工作階段來做。**
 
@@ -135,9 +158,13 @@
 
 ## 第 3 階段：自動化
 
-- [ ] 背景定位接收入口（Overland／OwnTracks）
-- [ ] 捷徑教學：快速記一筆、每晚步數、每小時定位
-- [ ] Scriptable 小工具
+- [x] 背景定位接收入口（Overland／OwnTracks）— `worker/auto.js`、`supabase/automation.sql`
+- [x] 捷徑教學：快速記一筆、每晚步數、記下位置（`docs/setup-automation.md`）
+- [x] Scriptable 小工具（`scriptable/ledger-widget.js`，App 設定頁複製）
+- [x] 時間軸「抵達／離開」、步數顯示
+- [ ] 部署：App（GitHub Pages）＋照片伺服器（Cloudflare 從預設分支的 `worker/` 自動部署）
+- [ ] 使用者執行 automation.sql、產生金鑰、設定 Overland／捷徑／Scriptable
+- [ ] 使用者在 iPhone 上實測
 
 ## 第 4 階段：進階
 

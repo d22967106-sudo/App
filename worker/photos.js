@@ -14,15 +14,12 @@
  *   GET    /photos/<id>/thumb|display   下載
  *   DELETE /photos/<id>                 刪除兩種尺寸
  *   GET    /health                      測試連線（不用登入）
+ *   /auto/…                             自動化接收端（背景定位、捷徑、小工具），見 auto.js
  */
 
+import { CORS, handleAuto } from './auto.js'
+
 const MAX_BYTES = 8 * 1024 * 1024
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, PUT, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-  'Access-Control-Max-Age': '86400',
-}
 
 const reply = (body, status = 200, headers = {}) =>
   new Response(body, { status, headers: { ...CORS, 'Content-Type': 'text/plain; charset=utf-8', ...headers } })
@@ -62,6 +59,7 @@ export default {
         ? reply(`設定不完整，缺少：${missing.join('、')}\n目前這個 Worker 看得到的名稱：${have}`, 500)
         : reply('ok')
     }
+    if (url.pathname === '/auto' || url.pathname.startsWith('/auto/')) return handleAuto(request, env, url)
 
     const m = /^\/photos\/([A-Za-z0-9-]{1,64})(?:\/(thumb|display))?$/.exec(url.pathname)
     if (!m) return reply('找不到', 404)

@@ -6,12 +6,14 @@ import { MapStyleSheet } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
-import { buildRoute, buildTimeline, dayStats, type RoutePoint } from '../lib/day'
-import { getEntriesByDate, getMeta, getPhoto, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
+import { buildRoute, buildTimeline, dayStats, dayStays, type RoutePoint } from '../lib/day'
+import { getEntriesByDate, getMeta, getPhoto, getSteps, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
 import { entrySubtitle, entryTitle, shortAmount } from '../lib/display'
 import { getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
+import { useStayNames } from '../lib/stayNames'
+import { isAuto } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
@@ -67,6 +69,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const date = rawDate && isDateKey(rawDate) ? rawDate : today
   const entries = useLiveQuery(() => getEntriesByDate(date), [date])
   const track = useLiveQuery(() => getTrackByDate(date), [date])
+  const steps = useLiveQuery(() => getSteps(date), [date])
   const lastPos = useLiveQuery(() => getMeta<GeoPoint>('lastPos'), [])
   const thumbs = useThumbUrls(entries)
   const [selected, setSelected] = useState<string | null>(null)
@@ -82,13 +85,30 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   useEffect(() => setSelected(null), [date])
 
   const route = useMemo(() => buildRoute(entries ?? [], track ?? []), [entries, track])
-  const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? []), [entries, track])
-  const stats = useMemo(() => dayStats(entries ?? [], track ?? []), [entries, track])
+  const stays = useMemo(() => dayStays(track ?? []), [track])
+  const stayNames = useStayNames(stays, entries)
+  const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? [], stays), [entries, track, stays])
+  const stats = useMemo(() => dayStats(entries ?? [], track ?? [], stays), [entries, track, stays])
 
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = []
-    const firstTrack = track?.[0]
-    for (const t of track ?? []) {
+    const manual = (track ?? []).filter((t) => !isAuto(t))
+    const firstTrack = manual[0]
+    // 背景定位：起點一個標記，停留的地方各一個標記（路上經過的點只畫線）
+    const first = route[0]
+    if (first && first.ref.type === 'track' && route.length > 1 && !manual.some((t) => t.id === first.ref.id)) {
+      out.push({ id: first.ref.id, lat: first.lat, lng: first.lng, kind: 'start', label: `${formatTime(first.time)} 出發` })
+    }
+    for (const s of stays) {
+      out.push({
+        id: s.id,
+        lat: s.lat,
+        lng: s.lng,
+        kind: 'checkin',
+        label: `${formatTime(s.start)}–${formatTime(s.end)} ${stayNames[s.id] ?? '停留'}`,
+      })
+    }
+    for (const t of manual) {
       const isStart = t === firstTrack && route[0]?.ref.id === t.id && route.length > 1
       out.push({
         id: t.id,
@@ -110,7 +130,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       })
     }
     return out
-  }, [entries, track, thumbs, route])
+  }, [entries, track, thumbs, route, stays, stayNames])
 
   // ── 播放當天行程 ──
   const [playhead, setPlayhead] = useState<GeoPoint | null>(null)
@@ -289,6 +309,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
               <span>
                 {stats.records} 則紀錄 · {stats.photos} 張照片
               </span>
+              {steps && <span>{steps.steps.toLocaleString('en-US')} 步</span>}
             </div>
           </div>
         </div>
@@ -299,7 +320,24 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
             </div>
           )}
           {timeline.map((item) =>
-            item.type === 'track' ? (
+            item.type === 'stay' ? (
+              <button
+                key={`${item.stay.id}-${item.edge}`}
+                data-id={item.edge === 'arrive' ? item.stay.id : undefined}
+                className={`row track-row stay-row${selected === item.stay.id ? ' selected' : ''}`}
+                onClick={() => setSelected(item.stay.id)}
+              >
+                <span className="time">{formatTime(item.time)}</span>
+                <span className="badge track">
+                  <Icon name="pin" size={16} />
+                </span>
+                <span className="main">
+                  <span className="title">
+                    {item.edge === 'arrive' ? '抵達' : '離開'} {stayNames[item.stay.id] ?? '…'}
+                  </span>
+                </span>
+              </button>
+            ) : item.type === 'track' ? (
               <button
                 key={item.point.id}
                 data-id={item.point.id}

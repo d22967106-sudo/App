@@ -12,6 +12,13 @@ const PATHS = {
   plus: <path d="M12 5v14M5 12h14" />,
   close: <path d="M6 6l12 12M18 6L6 18" />,
   check: <path d="M5 12.5l4.5 4.5L19 7" />,
+  copy: (
+    <>
+      <rect x="8" y="8" width="12" height="12" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </>
+  ),
+  bolt: <path d="M13 3L5 14h6l-1 7 8-11h-6l1-7z" />,
   map: (
     <>
       <path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2z" />

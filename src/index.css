@@ -1850,3 +1850,34 @@ button:disabled {
   padding: 8px 12px;
   border-radius: 12px;
 }
+
+/* 設定頁：自動化 */
+.auto-step {
+  margin: 6px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.auto-box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+.auto-box summary {
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.auto-box[open] summary {
+  margin-bottom: 10px;
+}
+.auto-box a.btn-primary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+}

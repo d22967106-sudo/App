@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { commonAmount, rankPlaces, rememberPlace } from './places'
 import { currencyForCountry, formatCurrency, rateFromPerTwd, toTwd } from './currency'
 import { buildRoute, buildTimeline, dayStats } from './day'
+import { cleanPath, detectStays } from './stays'
 import * as db from './db'
 import { countPlaces, distanceM, routeKm } from './geo'
 import { finishSearch, overpassNameRegex, parseNominatimSearch, parseOverpass, parsePhotonSearch, shortPlaceName, viewbox } from './geocode'
@@ -218,6 +219,46 @@ describe('一天的路線與統計', () => {
     const s = dayStats([e1, e2, entry({ kind: 'income', amountTwd: 500 })], [tp])
     expect(s).toMatchObject({ expense: 65, income: 500, places: 2, records: 3, photos: 2 })
     expect(s.km).toBeCloseTo(5, 0)
+  })
+})
+
+describe('背景定位：停留與路線', () => {
+  const home = { lat: 23.48, lng: 120.45 }
+  const office = { lat: 23.47, lng: 120.43 } // 約 2 公里外
+  const min = 60_000
+  const auto = (i: number, p: { lat: number; lng: number }, jitter = 0): TrackPoint => ({
+    id: `auto-${i}`, time: i * min, date: '2026-11-18', lat: p.lat + jitter, lng: p.lng, accuracy: 10, source: 'auto',
+  })
+  // 0–30 分在家（小飄移），31–40 分在路上，41–90 分在公司
+  const day: TrackPoint[] = [
+    ...Array.from({ length: 31 }, (_, i) => auto(i, home, (i % 3) * 0.0001)),
+    ...Array.from({ length: 10 }, (_, k) => auto(31 + k, { lat: home.lat + ((office.lat - home.lat) * (k + 1)) / 11, lng: home.lng + ((office.lng - home.lng) * (k + 1)) / 11 })),
+    ...Array.from({ length: 50 }, (_, k) => auto(41 + k, office)),
+  ]
+
+  it('找出停留：家（從一早開始）、公司（到最後）', () => {
+    const stays = detectStays(day)
+    expect(stays).toHaveLength(2)
+    expect(stays[0]).toMatchObject({ start: 0, end: 30 * min, fromDayStart: true, toDayEnd: false })
+    expect(stays[1]).toMatchObject({ start: 41 * min, end: 90 * min, fromDayStart: false, toDayEnd: true })
+  })
+
+  it('時間軸只顯示「離開家」「抵達公司」，不列出每個點', () => {
+    const tl = buildTimeline([], day)
+    expect(tl.map((i) => (i.type === 'stay' ? i.edge : i.type))).toEqual(['leave', 'arrive'])
+  })
+
+  it('停著不動的飄移不算距離；地點數只算停留的地方', () => {
+    const s = dayStats([], day)
+    expect(s.places).toBe(2)
+    expect(s.km).toBeGreaterThan(2)
+    expect(s.km).toBeLessThan(2.6)
+    expect(cleanPath(day.slice(0, 31))).toHaveLength(1)
+  })
+
+  it('精確度太差的點不畫進路線', () => {
+    const bad: TrackPoint = { ...auto(5, { lat: 25, lng: 121 }), accuracy: 900 }
+    expect(buildRoute([], [auto(1, home), bad]).map((p) => p.ref.id)).toEqual(['auto-1'])
   })
 })
 

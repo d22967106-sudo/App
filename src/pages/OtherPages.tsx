@@ -9,6 +9,7 @@ import { navigate, useLiveQuery } from '../lib/hooks'
 import { toDateKey, totalTwd } from '../lib/ledger'
 import { onCloudChange } from '../lib/cloud'
 import { cloudReady } from '../lib/sync'
+import { AutomationSection } from './AutomationSection'
 import { CloudSection } from './CloudSection'
 
 function Placeholder({ icon, title, text }: { icon: IconName; title: string; text: string }) {
@@ -143,6 +144,8 @@ export function StatsPage() {
 
         <CloudSection />
 
+        <AutomationSection />
+
         <section className="card" aria-label="地圖樣式">
           <h2 className="section-title">地圖樣式</h2>
           <MapStylePicker />
@@ -217,7 +220,7 @@ export function StatsPage() {
         </section>
 
         <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-          記帳日記 · 第 2 階段 · {__BUILD_DATE__}
+          記帳日記 · 第 3 階段 · {__BUILD_DATE__}
         </p>
       </div>
     </div>
