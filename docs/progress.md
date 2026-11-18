@@ -38,7 +38,7 @@
 - **Scriptable**：範本 `scriptable/ledger-widget.js`，App 複製時填入網址、金鑰、預算、App 網址。中型（今日支出、本月預算進度、步數、最後地點、今天路線縮圖）、小型（今日支出＋預算；參數「一年前」→ 一年前的今天，有照片就當背景）、鎖定畫面長方形。沒網路時顯示上次的資料。
 - **使用者回饋（2026-11-18）**：
   - 小工具：今天還沒離開起點 200 公尺時，右邊不畫路線，改顯示「今天在 ○○」（用 Scriptable 的 `Location.reverseGeocode` 查地名，查不到用最後一筆紀錄的地名）；沒有任何軌跡顯示「今天還沒有軌跡」。改了要使用者重新複製腳本貼上。
-  - 點小工具打開主畫面的 App（不是 Safari）：捷徑「打開 URL」`webapp://d22967106-sudo.github.io/App/` 可以打開 App（Apple 沒有文件，網友回報、使用者實測；含 https:// 的寫法不行）。但 Scriptable 的 `widget.url` 和小工具設定的 Open URL 用 webapp:// 或 shortcuts:// 都會停在 Scriptable，所以腳本改成 `widget.url = URLScheme.forRunningScript() + '?open=1'`（Scriptable 自己的網址一定開得了），腳本收到 `open=1` 就 `Safari.open('shortcuts://run-shortcut?name=打開記帳日記')`，由捷徑（內容：打開 URL webapp://…）打開 App。使用者要建立同名捷徑。腳本版本 2026-11-18.6，待實測。
+  - 點小工具打開主畫面的 App（不是 Safari）：捷徑「打開 URL」`webapp://d22967106-sudo.github.io/App/` 可以打開 App（Apple 沒有文件，網友回報、使用者實測；含 https:// 的寫法不行）。但 Scriptable 的 `widget.url` 和小工具設定的 Open URL 用 webapp:// 或 shortcuts:// 都會停在 Scriptable，所以腳本改成 `widget.url = URLScheme.forRunningScript() + '?open=1'`（Scriptable 自己的網址一定開得了），腳本收到 `open=1` 就 `Safari.open('shortcuts://run-shortcut?name=打開記帳日記')`，由捷徑（內容：打開 URL webapp://…）打開 App。使用者要建立同名捷徑。腳本版本 2026-11-18.6，使用者實測成功（Scriptable → 捷徑 → App）。也試過在 Scriptable 腳本裡直接 `Safari.open('webapp://…')`：沒反應，所以無法省掉捷徑那一跳；完全不經過 Scriptable 只有原生 App 小工具做得到（需要 Mac＋付費帳號，不在前提內）。
   - 金額沒填按儲存＝0 元（輸入框提示本來就是 0）。
   - Scriptable 腳本第一行有版本（`版本 2026-11-18.2`），App 設定頁顯示目前版本（`SCRIPT_VERSION` 從範本讀出），改腳本時要改版本號，使用者才知道要重新貼上。
   - 0 元也能記帳：App 的金額可以填 0（`parseAmount` 允許 0，列表顯示「0」不加正負號）；捷徑金額填 0 記成 0 元的帳，留空才當日記。
