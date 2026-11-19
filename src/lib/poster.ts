@@ -19,6 +19,7 @@ export type PosterBasemap = 'tea' | 'osm' | 'none'
 
 export interface PosterDay {
   color: string
+  dashed?: boolean
   route: GeoPoint[]
   landmark: (GeoPoint & { name: string }) | null
 }
@@ -283,7 +284,9 @@ async function draw(input: PosterInput): Promise<Blob> {
         })
         ctx.strokeStyle = pass === 'casing' ? (input.basemap !== 'none' ? '#FFFFFF' : BG) : d.color
         ctx.lineWidth = pass === 'casing' ? 14 : 7
+        ctx.setLineDash(pass === 'line' && d.dashed ? [16, 14] : [])
         ctx.stroke()
+        ctx.setLineDash([])
       }
     }
 
@@ -349,9 +352,21 @@ async function draw(input: PosterInput): Promise<Blob> {
   const slot = mw / Math.max(shown.length, 1)
   shown.forEach((d, i) => {
     const x = mx + slot * i + (shown.length === 1 ? 0 : 0)
-    ctx.fillStyle = d.color
-    roundRect(ctx, x, ly - 11, 32, 7, 3.5)
-    ctx.fill()
+    if (d.dashed) {
+      ctx.strokeStyle = d.color
+      ctx.lineWidth = 7
+      ctx.lineCap = 'butt'
+      ctx.setLineDash([9, 6])
+      ctx.beginPath()
+      ctx.moveTo(x, ly - 7.5)
+      ctx.lineTo(x + 32, ly - 7.5)
+      ctx.stroke()
+      ctx.setLineDash([])
+    } else {
+      ctx.fillStyle = d.color
+      roundRect(ctx, x, ly - 11, 32, 7, 3.5)
+      ctx.fill()
+    }
     ctx.fillStyle = TEXT_BODY
     ctx.fillText(i === 6 && input.days.length > 7 ? `Day 7…${input.days.length}` : `Day ${i + 1}`, x + 42, ly - 1)
   })

@@ -23,7 +23,7 @@ export interface MapMarker {
 interface Props {
   route: GeoPoint[]
   /** 多段路線各自的顏色（旅程：每天一種顏色）；有給就不畫 route */
-  routes?: { points: GeoPoint[]; color: string }[]
+  routes?: { points: GeoPoint[]; color: string; dashed?: boolean }[]
   markers: MapMarker[]
   selectedId?: string | null
   onSelect?: (id: string) => void
@@ -138,7 +138,7 @@ export function MapView({
   const tileFilter = useBaseLayer(mapRef)
 
   // 畫路線與標記
-  const routeKey = JSON.stringify([route.map((p) => [p.lat, p.lng]), routes?.map((r) => [r.color, r.points.map((p) => [p.lat, p.lng])])])
+  const routeKey = JSON.stringify([route.map((p) => [p.lat, p.lng]), routes?.map((r) => [r.color, r.dashed, r.points.map((p) => [p.lat, p.lng])])])
   const markerKey = JSON.stringify(markers)
   useEffect(() => {
     const map = mapRef.current
@@ -146,7 +146,7 @@ export function MapView({
     if (!map || !layer) return
     layer.clearLayers()
     markerRefs.current.clear()
-    const lines = routes ?? [{ points: route, color: PRIMARY }]
+    const lines: { points: GeoPoint[]; color: string; dashed?: boolean }[] = routes ?? [{ points: route, color: PRIMARY }]
     const latlngs: L.LatLng[] = []
     for (const line of lines) {
       const ll = line.points.map((p) => L.latLng(p.lat, p.lng))
@@ -155,7 +155,7 @@ export function MapView({
     }
     for (const line of lines) {
       const ll = line.points.map((p) => L.latLng(p.lat, p.lng))
-      if (ll.length > 1) L.polyline(ll, { color: line.color, weight: 5, opacity: 1, lineJoin: 'round', interactive: false }).addTo(layer)
+      if (ll.length > 1) L.polyline(ll, { color: line.color, weight: 5, opacity: 1, lineJoin: 'round', dashArray: line.dashed ? '10 9' : undefined, interactive: false }).addTo(layer)
     }
     // 照片標記放最上面
     const sorted = [...markers].sort((a, b) => Number(!!a.thumbUrl) - Number(!!b.thumbUrl))

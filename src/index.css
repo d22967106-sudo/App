@@ -2547,6 +2547,7 @@ button:disabled {
   height: 12px;
   border-radius: 6px;
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .trip-day-title .lbl {

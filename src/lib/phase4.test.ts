@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { calendarDays, categoryTotals, comparePeriod, eachDate, expenseSeries, firstWeekday, shiftMonth, sumExpenseUntil } from './stats'
-import { formatTripRange, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
+import { dayColor, dayDashed, formatTripRange, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
 import { formatBytes, yearsLeft, yearsText } from './usage'
 import type { Entry, TrackPoint, Trip } from './types'
 
@@ -134,8 +134,8 @@ describe('旅程', () => {
     ]
     const s = summarizeTrip(trip, entries, [], [{ date: '2026-10-03', steps: 12000, updatedAt: 1 }])
     expect(s.days.map((d) => [d.color, d.title, d.expense])).toEqual([
-      ['#4F7CAC', '抵達', 210],
-      ['#C9733C', '', 168],
+      ['#59413C', '抵達', 210],
+      ['#8D4E29', '', 168],
     ])
     expect(s.expense).toBe(378)
     expect(s.foreign).toEqual([['JPY', 1800]])
@@ -143,6 +143,13 @@ describe('旅程', () => {
     expect(s.photoIds).toEqual(['a'])
     expect(s.days[1].landmark?.name).toBe('嵐山')
     expect(s.km).toBeGreaterThan(5)
+  })
+
+  it('每天的顏色：10 色，第 11–20 天虛線', () => {
+    expect([dayColor(0), dayDashed(0)]).toEqual(['#59413C', false])
+    expect([dayColor(10), dayDashed(10)]).toEqual(['#59413C', true])
+    expect([dayColor(19), dayDashed(19)]).toEqual(['#B37148', true])
+    expect([dayColor(20), dayDashed(20)]).toEqual(['#59413C', false])
   })
 
   it('日期範圍的寫法', () => {

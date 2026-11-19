@@ -25,6 +25,7 @@ import { renderPoster, type PosterBasemap, type PosterRatio } from '../lib/poste
 import { eachDate } from '../lib/stats'
 import {
   dayColor,
+  dayDashed,
   foreignText,
   formatTripRange,
   guessTripName,
@@ -56,6 +57,11 @@ async function loadSummary(trip: Trip): Promise<TripSummary> {
   return summarizeTrip(trip, entries, track, steps)
 }
 
+/** 每天的顏色點；虛線的日子畫成虛線圈 */
+function DayDot({ color, dashed }: { color: string; dashed: boolean }) {
+  return <span className="dot" style={dashed ? { border: `2px dashed ${color}`, background: 'transparent' } : { background: color }} />
+}
+
 // ── 小小的軌跡縮圖 ──
 
 function MiniRoute({ summary, size = 92 }: { summary: TripSummary; size?: number }) {
@@ -83,7 +89,7 @@ function MiniRoute({ summary, size = 92 }: { summary: TripSummary; size?: number
       <rect width={size} height={size} rx="14" fill="#EEDFCC" />
       {summary.days.map((d) =>
         d.route.length > 1 ? (
-          <polyline key={d.date} points={d.route.map(pt).join(' ')} fill="none" stroke={d.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          <polyline key={d.date} points={d.route.map(pt).join(' ')} fill="none" stroke={d.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" strokeDasharray={d.dashed ? '5 4' : undefined} />
         ) : null,
       )}
       <circle cx={sx} cy={sy} r="4.5" fill="#3A2618" />
@@ -321,7 +327,7 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
             </h2>
             {days.map((date, i) => (
               <div key={date} className="trip-day-title">
-                <span className="dot" style={{ background: dayColor(i) }} />
+                <DayDot color={dayColor(i)} dashed={dayDashed(i)} />
                 <span className="lbl">
                   Day {i + 1}
                   <small>
@@ -410,7 +416,7 @@ function TripDetail({ id }: { id: string }) {
       <div className="trip-map">
         <MapView
           route={[]}
-          routes={summary.days.map((d) => ({ points: d.route, color: d.color }))}
+          routes={summary.days.map((d) => ({ points: d.route, color: d.color, dashed: d.dashed }))}
           markers={markers}
           static={false}
           fallbackCenter={first ?? { lat: 23.6, lng: 120.9 }}
@@ -459,7 +465,7 @@ function TripDetail({ id }: { id: string }) {
         <div className="trip-days">
           {summary.days.map((d) => (
             <button key={d.date} onClick={() => navigate(`day/${d.date}`)} aria-label={`Day ${d.index + 1}${d.title ? ` ${d.title}` : ''}，支出 ${formatNumber(d.expense)}`}>
-              <span className="dot" style={{ background: d.color }} />
+              <DayDot color={d.color} dashed={d.dashed} />
               <span className="lbl">
                 Day {d.index + 1}
                 {d.title ? ` · ${d.title}` : ` · ${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`}
@@ -506,7 +512,7 @@ function PosterPage({ id }: { id: string }) {
       name: trip.name,
       start: trip.start,
       end: trip.end,
-      days: summary.days.map((d) => ({ color: d.color, route: d.route, landmark: d.landmark })),
+      days: summary.days.map((d) => ({ color: d.color, dashed: d.dashed, route: d.route, landmark: d.landmark })),
       stats: { km: summary.km, places: summary.places, photos: summary.photos, expense: summary.expense, steps: summary.steps },
       ratio,
       basemap,

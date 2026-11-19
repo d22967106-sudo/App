@@ -7,24 +7,30 @@ import { isAuto, usableAutoPoints } from './stays'
 import type { DailySteps, Entry, GeoPoint, TrackPoint, Trip } from './types'
 
 /**
- * 旅程每天的顏色：前 5 個是 plan.md 定案的，後 5 個是 2026-11-19 補的（同樣偏灰、偏暖的奶茶色系）。
- * 10 個顏色兩兩的 CIELAB 色差至少 16，跟地圖底色 #EEDFCC 的色差至少 43；超過 10 天才循環。
+ * 旅程每天的顏色（使用者 2026-11-19 選定「咖啡色 10 色 × 實線／虛線」）：
+ * 10 個咖啡色，順序排過讓「隔天」兩色差最多（CIEDE2000 ≥ 15，任兩色 ≥ 12）；
+ * 第 1–10 天實線、第 11–20 天同樣顏色的虛線，超過 20 天才重複。
  */
 export const DAY_COLORS = [
-  '#4F7CAC', // 霧藍
-  '#C9733C', // 焦糖橘
-  '#6E8B5B', // 橄欖綠
-  '#8A6BA0', // 灰紫
-  '#B8912F', // 芥末黃
-  '#A8524A', // 磚紅
-  '#3E8C84', // 青綠
-  '#C2718A', // 乾燥玫瑰
-  '#3F5A7A', // 深藍灰
-  '#7B5638', // 可可棕
+  '#59413C', // 濃縮
+  '#8D4E29', // 肉桂
+  '#9C8B7A', // 燕麥奶
+  '#E39671', // 杏桃奶茶
+  '#AE5A4D', // 紅茶磚
+  '#8F682C', // 黑糖
+  '#B1837B', // 玫瑰可可
+  '#C29658', // 蜂蜜拿鐵
+  '#7F685E', // 摩卡
+  '#B37148', // 焦糖
 ]
 
 export function dayColor(i: number): string {
   return DAY_COLORS[i % DAY_COLORS.length]
+}
+
+/** 第 11–20 天（以此類推每隔 10 天）用虛線 */
+export function dayDashed(i: number): boolean {
+  return Math.floor(i / DAY_COLORS.length) % 2 === 1
 }
 
 export function tripLength(trip: Pick<Trip, 'start' | 'end'>): number {
@@ -45,6 +51,8 @@ export interface TripDay {
   date: string
   index: number
   color: string
+  /** 虛線（第 11–20 天） */
+  dashed: boolean
   title: string
   route: GeoPoint[]
   expense: number
@@ -102,6 +110,7 @@ export function summarizeTrip(trip: Trip, entries: Entry[], track: TrackPoint[],
       date,
       index,
       color: dayColor(index),
+      dashed: dayDashed(index),
       title: trip.dayTitles[index]?.trim() || '',
       route,
       expense: st.expense,
