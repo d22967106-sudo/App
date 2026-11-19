@@ -46,12 +46,25 @@ export const REMOTE_TABLE: Record<SyncTable, string> = {
   places: 'places',
   photos: 'photos',
   steps: 'daily_steps',
+  trips: 'trips',
 }
 
 const PAGE = 500
 
 /** 雲端可能還沒建立的表（下載失敗就跳過） */
-const OPTIONAL_TABLES = new Set<SyncTable>(['steps'])
+const OPTIONAL_TABLES = new Set<SyncTable>(['steps', 'trips'])
+
+function isMissingTable(table: SyncTable, e: unknown): boolean {
+  return OPTIONAL_TABLES.has(table) && e instanceof CloudError && (e.status === 404 || /找不到資料表/.test(e.message))
+}
+
+/** 這次同步發現雲端還沒建立的表 */
+const missingSet = new Set<SyncTable>()
+
+/** 雲端還沒建立的表（例如還沒執行 phase4.sql 時的 trips） */
+export function missingTables(): SyncTable[] {
+  return [...missingSet]
+}
 
 /** 送到雲端的內容（照片不含圖檔本身） */
 export function toRemoteData(table: SyncTable, rec: unknown): Record<string, unknown> {
@@ -156,7 +169,16 @@ async function push(userId: string): Promise<{ photosPaused: number }> {
         setStatus({ pending: await countOutbox() })
       }
     }
-    for (let i = 0; i < rows.length; i += PAGE) await upsertRows(table, userId, rows.slice(i, i + PAGE))
+    try {
+      for (let i = 0; i < rows.length; i += PAGE) await upsertRows(table, userId, rows.slice(i, i + PAGE))
+    } catch (e) {
+      // 旅程表是第 4 階段才有的：還沒執行 phase4.sql 就先留在手機，等建好表再上傳
+      if (isMissingTable(table, e)) {
+        missingSet.add(table)
+        continue
+      }
+      throw e
+    }
     await ackOutbox(done)
   }
   return { photosPaused }
@@ -178,7 +200,10 @@ async function pull(userId: string): Promise<string[]> {
         )
       } catch (e) {
         // 步數表是第 3 階段才有的：還沒執行 automation.sql 就先跳過，不影響其他資料同步
-        if (OPTIONAL_TABLES.has(table) && e instanceof CloudError && (e.status === 404 || /找不到資料表/.test(e.message))) break
+        if (isMissingTable(table, e)) {
+          missingSet.add(table)
+          break
+        }
         throw e
       }
       const rows = (await res.json()) as (RemoteRow & { server_updated_at: string })[]
@@ -236,6 +261,7 @@ async function syncOnce(): Promise<void> {
     return
   }
   setStatus({ running: true, needLogin: false })
+  missingSet.clear()
   try {
     const { photosPaused } = await push(session.userId)
     const needThumb = await pull(session.userId)

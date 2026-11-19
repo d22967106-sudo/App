@@ -22,6 +22,8 @@ export interface MapMarker {
 
 interface Props {
   route: GeoPoint[]
+  /** 多段路線各自的顏色（旅程：每天一種顏色）；有給就不畫 route */
+  routes?: { points: GeoPoint[]; color: string }[]
   markers: MapMarker[]
   selectedId?: string | null
   onSelect?: (id: string) => void
@@ -83,6 +85,7 @@ function iconFor(m: MapMarker, selected: boolean): L.DivIcon {
 
 export function MapView({
   route,
+  routes,
   markers,
   selectedId,
   onSelect,
@@ -135,7 +138,7 @@ export function MapView({
   const tileFilter = useBaseLayer(mapRef)
 
   // 畫路線與標記
-  const routeKey = JSON.stringify(route.map((p) => [p.lat, p.lng]))
+  const routeKey = JSON.stringify([route.map((p) => [p.lat, p.lng]), routes?.map((r) => [r.color, r.points.map((p) => [p.lat, p.lng])])])
   const markerKey = JSON.stringify(markers)
   useEffect(() => {
     const map = mapRef.current
@@ -143,10 +146,16 @@ export function MapView({
     if (!map || !layer) return
     layer.clearLayers()
     markerRefs.current.clear()
-    const latlngs = route.map((p) => L.latLng(p.lat, p.lng))
-    if (latlngs.length > 1) {
-      L.polyline(latlngs, { color: '#FFFFFF', weight: 10, opacity: 1, lineJoin: 'round', interactive: false }).addTo(layer)
-      L.polyline(latlngs, { color: PRIMARY, weight: 5, opacity: 1, lineJoin: 'round', interactive: false }).addTo(layer)
+    const lines = routes ?? [{ points: route, color: PRIMARY }]
+    const latlngs: L.LatLng[] = []
+    for (const line of lines) {
+      const ll = line.points.map((p) => L.latLng(p.lat, p.lng))
+      latlngs.push(...ll)
+      if (ll.length > 1) L.polyline(ll, { color: '#FFFFFF', weight: 10, opacity: 1, lineJoin: 'round', interactive: false }).addTo(layer)
+    }
+    for (const line of lines) {
+      const ll = line.points.map((p) => L.latLng(p.lat, p.lng))
+      if (ll.length > 1) L.polyline(ll, { color: line.color, weight: 5, opacity: 1, lineJoin: 'round', interactive: false }).addTo(layer)
     }
     // 照片標記放最上面
     const sorted = [...markers].sort((a, b) => Number(!!a.thumbUrl) - Number(!!b.thumbUrl))

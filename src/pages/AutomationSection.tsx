@@ -40,7 +40,7 @@ function CopyButton({ text, label, what }: { text: string; label: string; what?:
   )
 }
 
-/** 「統計與設定」裡的自動化區塊 */
+/** 設定頁裡的自動化區塊 */
 export function AutomationSection() {
   const [st, setSt] = useState<{ cfg: CloudConfig | null; session: CloudSession | null; key: AutoKey | null; budget: number }>()
   const load = async () =>

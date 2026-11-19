@@ -82,6 +82,21 @@ export interface TrackPoint {
   label?: string
 }
 
+/** 旅程：一段日期範圍，每天一種顏色 */
+export interface Trip {
+  id: string
+  name: string
+  /** 開始、結束日期 YYYY-MM-DD（含頭尾） */
+  start: string
+  end: string
+  /** 每天的小標題（第 i 個＝第 i+1 天），可空 */
+  dayTitles: string[]
+  /** 封面照片；沒選就用軌跡縮圖 */
+  coverPhotoId: string | null
+  createdAt: number
+  updatedAt: number
+}
+
 export interface Photo {
   id: string
   entryId: string

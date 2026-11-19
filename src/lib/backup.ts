@@ -3,7 +3,7 @@ import { cacheGet, dumpAll, restoreAll } from './db'
 import { getDisplayBlob } from './sync'
 import { toDateKey } from './ledger'
 import { photoExt } from './photos'
-import type { DailySteps, DailySummary, Entry, Photo, Place, TrackPoint } from './types'
+import type { DailySteps, DailySummary, Entry, Photo, Place, TrackPoint, Trip } from './types'
 
 /**
  * 匯出格式（通用、不綁服務）：
@@ -27,6 +27,7 @@ interface BackupJson {
   photos: PhotoMeta[]
   /** 第 3 階段新增（舊備份沒有） */
   steps?: DailySteps[]
+  trips?: Trip[]
 }
 
 const zipAsync = (files: Record<string, Uint8Array | [Uint8Array, { level: 0 }]>) =>
@@ -73,6 +74,7 @@ export async function buildBackup(
     places: all.places,
     photos,
     steps: all.steps,
+    trips: all.trips,
   }
   files['data.json'] = strToU8(JSON.stringify(json, null, 2))
   const data = await zipAsync(files)
@@ -119,6 +121,7 @@ export async function restoreBackup(file: Blob): Promise<{ entries: number; phot
     places: json.places ?? [],
     photos,
     steps: json.steps ?? [],
+    trips: json.trips ?? [],
   })
   return { entries: json.entries?.length ?? 0, photos: photos.length }
 }

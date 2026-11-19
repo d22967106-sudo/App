@@ -1881,3 +1881,985 @@ button:disabled {
   justify-content: center;
   text-decoration: none;
 }
+
+/* ── 日曆 ── */
+
+.cal-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.cal-head .date-pill {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.cal-today {
+  height: 48px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--card);
+  color: var(--primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.cal-summary {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-2);
+  margin: 0 4px 14px;
+}
+
+.cal-summary b {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.cal-week {
+  font-size: 12px;
+  color: var(--text-2);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.cal-cell {
+  position: relative;
+  height: 72px;
+  border: none;
+  background: transparent;
+  padding: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font: inherit;
+  color: var(--text);
+  border-radius: 12px;
+  min-width: 0;
+}
+
+.cal-cell:disabled {
+  color: #b9a794;
+}
+
+.cal-cell.selected {
+  background: var(--soft);
+}
+
+.cal-cell .num {
+  font-size: 15px;
+  font-weight: 500;
+  min-width: 24px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 11px;
+}
+
+.cal-cell.today .num {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.cal-cell .amt {
+  font-size: 10px;
+  color: var(--text-2);
+  line-height: 1.3;
+}
+
+.cal-cell .thumb {
+  width: 20px;
+  height: 15px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--muted-dot);
+}
+
+.cal-cell .thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cal-cell .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--primary);
+  margin-top: 4px;
+}
+
+.cal-cell .band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 14px;
+  background: var(--primary);
+}
+
+.cal-cell .band.start {
+  left: 3px;
+  border-top-left-radius: 7px;
+  border-bottom-left-radius: 7px;
+}
+
+.cal-cell .band.end {
+  right: 3px;
+  border-top-right-radius: 7px;
+  border-bottom-right-radius: 7px;
+}
+
+.cal-cell .band-label {
+  position: absolute;
+  left: 6px;
+  top: 0;
+  z-index: 1;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-hint {
+  text-align: center;
+  font-size: 14px;
+  margin-top: 16px;
+}
+
+.cal-day {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-radius: 20px;
+}
+
+.cal-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cal-day-head .title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.cal-day-head small {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.cal-day-head a {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cal-day-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cal-day-stats div {
+  display: flex;
+  flex-direction: column;
+}
+
+.cal-day-stats span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.cal-day-stats strong {
+  font-size: 17px;
+}
+
+.cal-day-more {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.cal-day-more .ph {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--soft);
+  flex-shrink: 0;
+}
+
+.cal-day-more .ph img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cal-day-more p {
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-body);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── 統計 ── */
+
+.big-title {
+  font-size: 26px !important;
+}
+
+.stats-page .page-head .round-btn {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+
+.stats-period {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.segmented.small {
+  grid-template-columns: repeat(2, 56px);
+  border-radius: 22px;
+  padding: 3px;
+}
+
+.segmented.small button {
+  border-radius: 19px;
+  height: 38px;
+}
+
+.stats-nav {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stats-nav button {
+  width: 44px;
+  height: 44px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.stats-nav button:disabled {
+  color: #b9a794;
+}
+
+.stats-nav strong {
+  font-size: 16px;
+}
+
+.stats-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: 20px;
+}
+
+.stats-card .lbl,
+.stats-tiles .lbl {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.stats-total {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.stats-compare {
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.stats-card .divider {
+  height: 1px;
+  background: var(--line);
+}
+
+.stats-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.stats-pair div {
+  display: flex;
+  flex-direction: column;
+}
+
+.stats-pair strong {
+  font-size: 17px;
+}
+
+.stats-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.stats-card-head h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.bars {
+  position: relative;
+  height: 120px;
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  margin-top: 14px;
+}
+
+.bars button {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0 1px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.bars button span {
+  display: block;
+  width: 100%;
+  max-width: 18px;
+  background: var(--primary);
+  border-radius: 2px 2px 0 0;
+}
+
+.bars-avg {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--text-2);
+  pointer-events: none;
+}
+
+.bars-avg span {
+  position: absolute;
+  right: 0;
+  bottom: 2px;
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--card);
+  padding: 0 2px;
+}
+
+.bars-ticks {
+  display: flex;
+  margin-top: -4px;
+}
+
+.bars-ticks span {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-2);
+  overflow: visible;
+  white-space: nowrap;
+}
+
+.cat-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  padding: 6px 0;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  min-height: 36px;
+}
+
+.cat-row .name {
+  width: 44px;
+  text-align: left;
+}
+
+.cat-row .track {
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--soft);
+  overflow: hidden;
+}
+
+.cat-row .track span {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--primary);
+}
+
+.cat-row .amt {
+  width: 64px;
+  text-align: right;
+  font-weight: 500;
+}
+
+.cat-row .pct {
+  width: 34px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.cat-detail {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--soft);
+}
+
+.cat-detail button {
+  width: 100%;
+  display: flex;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text-body);
+  padding: 6px 0;
+  text-align: left;
+}
+
+.cat-detail .d {
+  width: 40px;
+  color: var(--text-2);
+}
+
+.cat-detail .t {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cat-detail .more {
+  font-size: 13px;
+  padding: 4px 0;
+}
+
+.stats-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.stats-tiles div {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stats-tiles strong {
+  font-size: 20px;
+}
+
+/* ── 旅程 ── */
+
+.trip-new-btn {
+  height: 44px;
+  border-radius: 22px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 16px;
+}
+
+.trip-suggest {
+  background: var(--soft);
+  border-radius: 20px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trip-suggest .row1 {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  color: var(--primary);
+}
+
+.trip-suggest .row1 div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text);
+}
+
+.trip-suggest .row1 strong {
+  font-size: 15px;
+}
+
+.trip-suggest .row1 span {
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.trip-suggest .row2 {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  align-items: center;
+}
+
+.trip-suggest .row2 .btn-text {
+  font-size: 14px;
+  padding: 0 12px;
+}
+
+.trip-suggest .row2 .btn-primary {
+  font-size: 14px;
+}
+
+.trip-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 12px;
+  display: flex;
+  gap: 12px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.trip-card .cover {
+  width: 92px;
+  height: 92px;
+  border-radius: 14px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--soft);
+}
+
+.trip-card .cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.trip-card .info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.trip-card .info strong {
+  font-size: 17px;
+  color: var(--text);
+}
+
+.trip-edit .btn-text.strong {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.trip-edit .btn-text:disabled {
+  opacity: 0.4;
+}
+
+.trip-dates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.trip-dates .field {
+  margin: 0;
+  min-width: 0;
+}
+
+.trip-dates input {
+  min-width: 0;
+  width: 100%;
+}
+
+.trip-day-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trip-day-title .dot,
+.trip-days .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.trip-day-title .lbl {
+  width: 52px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.trip-day-title .lbl small {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.trip-day-title input {
+  flex: 1;
+  min-width: 0;
+}
+
+.trip-covers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trip-covers button {
+  width: 64px;
+  height: 64px;
+  border: none;
+  border-radius: 14px;
+  overflow: hidden;
+  padding: 0;
+  background: var(--soft);
+}
+
+.trip-covers button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.trip-covers button[aria-pressed='true'] {
+  outline: 3px solid var(--primary);
+  outline-offset: -3px;
+}
+
+.trip-covers .more {
+  border: 1px dashed var(--muted-dot);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.trip-detail {
+  min-height: 100%;
+  background: var(--card);
+}
+
+.trip-map {
+  position: relative;
+  height: 48vh;
+  background: var(--map);
+}
+
+.trip-pill {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  background: var(--card);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.2;
+}
+
+.trip-pill strong {
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  padding: 0 8px;
+}
+
+.trip-pill span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.trip-panel {
+  position: relative;
+  z-index: 700;
+  margin-top: -20px;
+  background: var(--card);
+  border-radius: 24px 24px 0 0;
+  box-shadow: var(--sheet-shadow);
+  padding: 20px 20px calc(var(--safe-bottom) + 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.trip-panel .hint {
+  margin: -6px 0 0;
+}
+
+.trip-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.trip-stats div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.trip-stats span {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.trip-stats strong {
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.trip-days {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trip-days button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  padding: 6px 0;
+  min-height: 36px;
+  text-align: left;
+}
+
+.trip-days .lbl {
+  width: 110px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trip-days .bar {
+  flex: 1;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--soft);
+  overflow: hidden;
+}
+
+.trip-days .bar span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+.trip-days .amt {
+  width: 62px;
+  text-align: right;
+  font-weight: 500;
+}
+
+.trip-panel > .btn-primary,
+.poster-page > .btn-primary {
+  height: 52px;
+  border-radius: 16px;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.poster-page {
+  background: #e9dccb;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.poster-page .entry-head {
+  background: #e9dccb;
+}
+
+.poster-preview {
+  position: relative;
+  align-self: center;
+  width: min(272px, 70vw);
+  aspect-ratio: 4 / 5;
+  background: #fbf6ef;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(58, 38, 24, 0.18);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.poster-preview.r916 {
+  width: min(220px, 56vw);
+  aspect-ratio: 9 / 16;
+}
+
+.poster-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.poster-options {
+  border-radius: 20px;
+}
+
+.poster-options .kv {
+  align-items: center;
+}
+
+.poster-options .kv span:first-child {
+  color: var(--text);
+}
+
+.poster-options input[type='checkbox'] {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
+}
+
+.segmented.small.two {
+  grid-template-columns: repeat(2, auto);
+}
+
+.segmented.small.two button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* ── 設定、使用狀況 ── */
+
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+}
+
+.settings-link > svg:first-child {
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.settings-link span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-link strong {
+  font-size: 15px;
+}
+
+.settings-link small {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.usage-big strong {
+  font-size: 26px;
+}
+
+.usage-big span {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.meter {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--soft);
+  overflow: hidden;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 5px;
+  background: var(--primary);
+}
+
+.usage-table .kv {
+  padding: 3px 0;
+}

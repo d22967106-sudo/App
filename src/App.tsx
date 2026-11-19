@@ -8,7 +8,11 @@ import { startAutoSync } from './lib/sync'
 import { DayPage } from './pages/DayPage'
 import { EntryPage } from './pages/EntryPage'
 import { MapPage } from './pages/MapPage'
-import { CalendarPage, StatsPage, TripPage } from './pages/OtherPages'
+import { CalendarPage } from './pages/CalendarPage'
+import { SettingsPage } from './pages/SettingsPage'
+import { StatsPage } from './pages/StatsPage'
+import { TripPage } from './pages/TripPages'
+import { UsagePage } from './pages/UsagePage'
 
 export default function App() {
   const { path, query } = useRoute()
@@ -29,9 +33,18 @@ export default function App() {
   } else if (top === 'day' && path[1]) {
     withTabs = false
     page = <DayPage date={path[1]} />
-  } else if (top === 'calendar') page = <CalendarPage />
-  else if (top === 'trip') page = <TripPage />
-  else if (top === 'stats') page = <StatsPage />
+  } else if (top === 'usage') {
+    withTabs = false
+    page = <UsagePage />
+  } else if (top === 'settings') {
+    withTabs = false
+    page = <SettingsPage />
+  } else if (top === 'calendar') page = <CalendarPage month={query.get('m')} selected={query.get('d')} />
+  else if (top === 'trip') {
+    const tripView = <TripPage path={path.slice(1)} query={query} />
+    withTabs = path.length < 2
+    page = tripView
+  } else if (top === 'stats') page = <StatsPage period={query.get('p')} />
   else page = <MapPage date={query.get('d')} />
 
   return (

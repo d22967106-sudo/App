@@ -13,6 +13,7 @@
  *   PUT    /photos/<id>/thumb|display   上傳
  *   GET    /photos/<id>/thumb|display   下載
  *   DELETE /photos/<id>                 刪除兩種尺寸
+ *   GET    /usage                       使用狀況：自己的照片佔多少空間（第 4 階段）
  *   GET    /health                      測試連線（不用登入）
  *   /auto/…                             自動化接收端（背景定位、捷徑、小工具），見 auto.js
  */
@@ -44,6 +45,28 @@ async function userIdFrom(request, env) {
   return user.id
 }
 
+/** 算出這個人的照片總共佔多少空間（R2 一次最多列 1000 個，最多翻 100 頁） */
+export async function photoUsage(env, userId) {
+  let bytes = 0
+  let objects = 0
+  let cursor
+  let complete = true
+  for (let page = 0; ; page++) {
+    if (page >= 100) {
+      complete = false
+      break
+    }
+    const list = await env.PHOTOS.list({ prefix: `${userId}/`, cursor, limit: 1000 })
+    for (const o of list.objects) {
+      bytes += o.size
+      objects++
+    }
+    if (!list.truncated) break
+    cursor = list.cursor
+  }
+  return { bytes, objects, complete }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
@@ -60,6 +83,13 @@ export default {
         : reply('ok')
     }
     if (url.pathname === '/auto' || url.pathname.startsWith('/auto/')) return handleAuto(request, env, url)
+
+    if (url.pathname === '/usage') {
+      if (request.method !== 'GET') return reply('不支援', 405)
+      const userId = await userIdFrom(request, env)
+      if (!userId) return reply('請先登入', 401)
+      return Response.json(await photoUsage(env, userId), { headers: CORS })
+    }
 
     const m = /^\/photos\/([A-Za-z0-9-]{1,64})(?:\/(thumb|display))?$/.exec(url.pathname)
     if (!m) return reply('找不到', 404)

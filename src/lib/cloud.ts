@@ -325,3 +325,10 @@ export async function checkPhotoServer(url: string): Promise<boolean> {
     return false
   }
 }
+
+/** 使用狀況：照片伺服器上自己的照片總共多大（第 4 階段的 Worker 才有） */
+export async function fetchPhotoUsage(): Promise<{ bytes: number; objects: number; complete: boolean } | null> {
+  const res = await photoFetch('usage')
+  if (res.status === 404) return null
+  return res.json()
+}

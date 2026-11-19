@@ -1,10 +1,10 @@
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb'
 import { toDateKey } from './ledger'
-import type { DailySteps, DailySummary, Entry, Photo, Place, RateCache, TrackPoint } from './types'
+import type { DailySteps, DailySummary, Entry, Photo, Place, RateCache, TrackPoint, Trip } from './types'
 
 /** 會同步到雲端的資料表 */
-export type SyncTable = 'entries' | 'summaries' | 'track' | 'places' | 'photos' | 'steps'
-export const SYNC_TABLES: SyncTable[] = ['entries', 'summaries', 'track', 'places', 'photos', 'steps']
+export type SyncTable = 'entries' | 'summaries' | 'track' | 'places' | 'photos' | 'steps' | 'trips'
+export const SYNC_TABLES: SyncTable[] = ['entries', 'summaries', 'track', 'places', 'photos', 'steps', 'trips']
 
 /** 待上傳佇列：只記「哪一筆改過」，上傳時再讀最新內容；本地已不存在就當成刪除 */
 export interface OutboxItem {
@@ -33,6 +33,7 @@ interface LedgerDB extends DBSchema {
   photos: { key: string; value: Photo; indexes: { entryId: string } }
   places: { key: string; value: Place }
   steps: { key: string; value: DailySteps }
+  trips: { key: string; value: Trip }
   meta: { key: string; value: unknown }
   outbox: { key: string; value: OutboxItem }
   displayCache: { key: string; value: DisplayCacheItem; indexes: { lastAccess: number } }
@@ -41,7 +42,7 @@ interface LedgerDB extends DBSchema {
 export type StoreName = StoreNames<LedgerDB>
 
 const DB_NAME = 'ledger-diary'
-const DB_VERSION = 3
+const DB_VERSION = 4
 
 let dbPromise: Promise<IDBPDatabase<LedgerDB>> | null = null
 
@@ -78,6 +79,9 @@ export function getDB(): Promise<IDBPDatabase<LedgerDB>> {
       }
       if (oldVersion < 3) {
         db.createObjectStore('steps', { keyPath: 'date' })
+      }
+      if (oldVersion < 4) {
+        db.createObjectStore('trips', { keyPath: 'id' })
       }
     },
   })
@@ -233,6 +237,83 @@ export async function getSteps(date: string): Promise<DailySteps | undefined> {
   return (await getDB()).get('steps', date)
 }
 
+// ── 一段日期的資料（日曆、統計、旅程用；日期含頭尾） ──
+
+export async function getEntriesInRange(start: string, end: string): Promise<Entry[]> {
+  return (await getDB()).getAllFromIndex('entries', 'date', IDBKeyRange.bound(start, end))
+}
+
+export async function getTrackInRange(start: string, end: string): Promise<TrackPoint[]> {
+  const list = await (await getDB()).getAllFromIndex('track', 'date', IDBKeyRange.bound(start, end))
+  return list.sort((a, b) => a.time - b.time)
+}
+
+export async function getStepsInRange(start: string, end: string): Promise<DailySteps[]> {
+  return (await getDB()).getAll('steps', IDBKeyRange.bound(start, end))
+}
+
+export async function getSummariesInRange(start: string, end: string): Promise<DailySummary[]> {
+  return (await getDB()).getAll('summaries', IDBKeyRange.bound(start, end))
+}
+
+export async function getAllTrack(): Promise<TrackPoint[]> {
+  return (await getDB()).getAll('track')
+}
+
+/** 使用狀況：手機上各類資料的筆數，以及最早一筆資料的日期與最早一張照片的時間 */
+export async function localCounts(): Promise<{
+  entries: number
+  track: number
+  photos: number
+  trips: number
+  firstDate: string | null
+  firstPhotoAt: number | null
+}> {
+  const db = await getDB()
+  const firstEntry = await db.transaction('entries').store.index('date').openCursor()
+  const firstTrack = await db.transaction('track').store.index('date').openCursor()
+  const dates = [firstEntry?.value.date, firstTrack?.value.date].filter((d): d is string => !!d).sort()
+  let firstPhotoAt: number | null = null
+  for (const p of await db.getAll('photos')) if (firstPhotoAt == null || p.createdAt < firstPhotoAt) firstPhotoAt = p.createdAt
+  return {
+    entries: await db.count('entries'),
+    track: await db.count('track'),
+    photos: await db.count('photos'),
+    trips: await db.count('trips'),
+    firstDate: dates[0] ?? null,
+    firstPhotoAt,
+  }
+}
+
+// ── 旅程 ──
+
+export async function getAllTrips(): Promise<Trip[]> {
+  const list = await (await getDB()).getAll('trips')
+  return list.sort((a, b) => b.start.localeCompare(a.start))
+}
+
+export async function getTrip(id: string): Promise<Trip | undefined> {
+  return (await getDB()).get('trips', id)
+}
+
+export async function saveTrip(trip: Trip): Promise<void> {
+  const tx = (await getDB()).transaction(['trips', 'outbox'], 'readwrite') as unknown as AnyTx
+  await tx.objectStore('trips').put(trip)
+  await queue(tx, 'trips', trip.id)
+  await tx.done
+  notify()
+  flushOutboxSignal()
+}
+
+export async function deleteTrip(id: string): Promise<void> {
+  const tx = (await getDB()).transaction(['trips', 'outbox'], 'readwrite') as unknown as AnyTx
+  await tx.objectStore('trips').delete(id)
+  await queue(tx, 'trips', id)
+  await tx.done
+  notify()
+  flushOutboxSignal()
+}
+
 // ── 照片 ──
 
 export async function getPhoto(id: string): Promise<Photo | undefined> {
@@ -277,6 +358,7 @@ export async function dumpAll() {
     places: await db.getAll('places'),
     photos: await db.getAll('photos'),
     steps: await db.getAll('steps'),
+    trips: await db.getAll('trips'),
   }
 }
 
@@ -287,9 +369,10 @@ export async function restoreAll(data: {
   places: Place[]
   photos: Photo[]
   steps?: DailySteps[]
+  trips?: Trip[]
 }): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction(['entries', 'summaries', 'track', 'places', 'photos', 'steps', 'outbox'], 'readwrite') as unknown as AnyTx
+  const tx = db.transaction(['entries', 'summaries', 'track', 'places', 'photos', 'steps', 'trips', 'outbox'], 'readwrite') as unknown as AnyTx
   for (const e of data.entries) {
     await tx.objectStore('entries').put(e)
     await queue(tx, 'entries', e.id)
@@ -313,6 +396,10 @@ export async function restoreAll(data: {
   for (const s of data.steps ?? []) {
     await tx.objectStore('steps').put(s)
     await queue(tx, 'steps', s.date)
+  }
+  for (const t of data.trips ?? []) {
+    await tx.objectStore('trips').put(t)
+    await queue(tx, 'trips', t.id)
   }
   await tx.done
   notify()
@@ -361,6 +448,7 @@ export function localVersion(table: SyncTable, rec: unknown): number {
     case 'entries':
     case 'summaries':
     case 'steps':
+    case 'trips':
       return r.updatedAt ?? 0
     case 'places':
       return r.updatedAt ?? r.lastVisit ?? 0

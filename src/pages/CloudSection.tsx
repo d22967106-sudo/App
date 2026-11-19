@@ -36,7 +36,7 @@ function useCloudState() {
 
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
-/** 「統計與設定」裡的雲端同步區塊 */
+/** 設定頁裡的雲端同步區塊 */
 export function CloudSection() {
   const st = useCloudState()
   const [editing, setEditing] = useState(false)

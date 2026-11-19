@@ -1,65 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
-import { Icon, type IconName } from '../components/Icon'
+import { Icon } from '../components/Icon'
 import { MapStylePicker } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { buildBackup, restoreBackup, shareOrDownload } from '../lib/backup'
-import { formatTwd } from '../lib/currency'
 import { getAllEntries, requestPersistentStorage } from '../lib/db'
-import { navigate, useLiveQuery } from '../lib/hooks'
-import { toDateKey, totalTwd } from '../lib/ledger'
+import { goBack, navigate, useLiveQuery } from '../lib/hooks'
 import { onCloudChange } from '../lib/cloud'
 import { cloudReady } from '../lib/sync'
 import { AutomationSection } from './AutomationSection'
 import { CloudSection } from './CloudSection'
 
-function Placeholder({ icon, title, text }: { icon: IconName; title: string; text: string }) {
-  return (
-    <div className="placeholder">
-      <Icon name={icon} size={40} />
-      <h2>{title}</h2>
-      <p>{text}</p>
-    </div>
-  )
-}
-
-export function CalendarPage() {
-  const today = toDateKey(new Date())
-  return (
-    <div className="page">
-      <div className="page-head">
-        <h1>日曆</h1>
-      </div>
-      <Placeholder icon="calendar" title="日曆頁之後會加入" text="第 4 階段會做月曆檢視。現在可以先選日期跳到那一天。" />
-      <div className="field">
-        <label htmlFor="jump">跳到日期</label>
-        <input
-          id="jump"
-          type="date"
-          className="text-input"
-          max={today}
-          defaultValue={today}
-          onChange={(e) => e.target.value && navigate(`map?d=${e.target.value}`, true)}
-        />
-      </div>
-    </div>
-  )
-}
-
-export function TripPage() {
-  return (
-    <div className="page">
-      <div className="page-head">
-        <h1>旅程</h1>
-      </div>
-      <Placeholder icon="trip" title="旅程之後會加入" text="第 4 階段會做旅程地圖與旅遊軌跡圖。現在記下的紀錄之後都能用。" />
-    </div>
-  )
-}
-
-export function StatsPage() {
+/** 設定：雲端同步、自動化、地圖樣式、使用狀況、備份（從統計頁右上齒輪進來） */
+export function SettingsPage() {
   const entries = useLiveQuery(() => getAllEntries(), [])
-  const month = toDateKey(new Date()).slice(0, 7)
-  const monthEntries = entries?.filter((e) => e.date.startsWith(month)) ?? []
   const [busy, setBusy] = useState<'export' | 'import' | null>(null)
   const [persisted, setPersisted] = useState<boolean | null>(null)
   const [usage, setUsage] = useState<string>('')
@@ -117,30 +70,24 @@ export function StatsPage() {
   }
 
   return (
-    <div className="page">
-      <div className="page-head">
-        <h1>統計與設定</h1>
+    <div className="page no-tabbar">
+      <div className="entry-head">
+        <button className="round-btn" aria-label="返回統計" onClick={() => goBack('stats')}>
+          <Icon name="chevronLeft" size={20} />
+        </button>
+        <h1>設定</h1>
+        <span style={{ width: 44 }} />
       </div>
 
       <div className="stack">
-        <section className="card" aria-label="本月">
-          <h2 className="section-title">本月</h2>
-          <div className="kv">
-            <span>支出</span>
-            <strong>{formatTwd(totalTwd(monthEntries, 'expense'))}</strong>
-          </div>
-          <div className="kv">
-            <span>收入</span>
-            <strong>{formatTwd(totalTwd(monthEntries, 'income'))}</strong>
-          </div>
-          <div className="kv">
-            <span>紀錄</span>
-            <strong>{monthEntries.length} 筆</strong>
-          </div>
-          <p className="muted" style={{ fontSize: 13, margin: '8px 0 0' }}>
-            每日／每月／分類的完整統計會在第 4 階段加入。
-          </p>
-        </section>
+        <button className="card settings-link" onClick={() => navigate('usage')}>
+          <Icon name="stats" size={20} />
+          <span>
+            <strong>使用狀況</strong>
+            <small>雲端資料庫、照片空間還剩多少</small>
+          </span>
+          <Icon name="chevronRight" size={18} />
+        </button>
 
         <CloudSection />
 
@@ -220,7 +167,7 @@ export function StatsPage() {
         </section>
 
         <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-          摳摳手帳 · 第 3 階段 · {__BUILD_DATE__}
+          摳摳手帳 · 第 4 階段 · {__BUILD_DATE__}
         </p>
       </div>
     </div>
