@@ -492,6 +492,7 @@ function PosterPage({ id }: { id: string }) {
   const [basemap, setBasemap] = useState<PosterBasemap>('tea')
   const [showMoney, setShowMoney] = useState(true)
   const [showNames, setShowNames] = useState(true)
+  const [showCredit, setShowCredit] = useState(true)
   const [blob, setBlob] = useState<Blob | null>(null)
   const [busy, setBusy] = useState(false)
   const url = useObjectUrl(blob)
@@ -511,6 +512,7 @@ function PosterPage({ id }: { id: string }) {
       basemap,
       showMoney,
       showNames,
+      showCredit,
     })
       .then((r) => {
         if (!alive) return
@@ -525,7 +527,7 @@ function PosterPage({ id }: { id: string }) {
     return () => {
       alive = false
     }
-  }, [data, ratio, basemap, showMoney, showNames])
+  }, [data, ratio, basemap, showMoney, showNames, showCredit])
 
   if (data === null) return <div className="page no-tabbar"><p className="muted">找不到這趟旅程</p></div>
   const name = data?.trip.name ?? ''
@@ -576,6 +578,15 @@ function PosterPage({ id }: { id: string }) {
           <span>顯示地名</span>
           <input type="checkbox" checked={showNames} onChange={(e) => setShowNames(e.target.checked)} />
         </label>
+        <label className="kv">
+          <span>顯示地圖出處</span>
+          <input type="checkbox" checked={showCredit} onChange={(e) => setShowCredit(e.target.checked)} />
+        </label>
+        {!showCredit && (
+          <p className="hint" style={{ margin: 0 }}>
+            地圖資料來自 OpenStreetMap，授權規定公開分享時要標出處。只自己留存可以關掉；要發到網路上，建議打開。
+          </p>
+        )}
       </section>
 
       <button className="btn-primary" disabled={!blob || busy} onClick={() => blob && shareOrDownload(blob, `${name}-旅遊軌跡圖.png`)}>

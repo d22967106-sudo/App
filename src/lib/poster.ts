@@ -33,6 +33,8 @@ export interface PosterInput {
   basemap: PosterBasemap
   showMoney: boolean
   showNames: boolean
+  /** 地圖出處（OSM 授權要求公開分享時標示；只自己看可以關掉） */
+  showCredit: boolean
 }
 
 const W = 1080
@@ -330,11 +332,12 @@ async function draw(input: PosterInput): Promise<Blob> {
     ctx.fillText('這段期間沒有軌跡', mx + mw / 2, my + mh / 2)
     ctx.textAlign = 'left'
   }
-  if (input.basemap !== 'none') {
-    ctx.font = `400 16px ${FONT}`
+  if (input.basemap !== 'none' && input.showCredit) {
+    // 小而淡，但還讀得出來
+    ctx.font = `400 15px ${FONT}`
     ctx.textAlign = 'right'
-    ctx.fillStyle = TEXT_2
-    ctx.fillText(input.basemap === 'tea' ? '© OpenFreeMap © OpenStreetMap' : '© OpenStreetMap', mx + mw - 14, my + mh - 12)
+    ctx.fillStyle = 'rgba(125, 100, 80, 0.75)'
+    ctx.fillText(input.basemap === 'tea' ? 'OpenFreeMap © OpenMapTiles © OpenStreetMap' : '© OpenStreetMap', mx + mw - 14, my + mh - 12)
     ctx.textAlign = 'left'
   }
   ctx.restore()

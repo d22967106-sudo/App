@@ -6,8 +6,22 @@ import { eachDate } from './stats'
 import { isAuto, usableAutoPoints } from './stays'
 import type { DailySteps, Entry, GeoPoint, TrackPoint, Trip } from './types'
 
-/** 旅程每天的顏色（plan.md 定案；超過 5 天循環） */
-export const DAY_COLORS = ['#4F7CAC', '#C9733C', '#6E8B5B', '#8A6BA0', '#B8912F']
+/**
+ * 旅程每天的顏色：前 5 個是 plan.md 定案的，後 5 個是 2026-11-19 補的（同樣偏灰、偏暖的奶茶色系）。
+ * 10 個顏色兩兩的 CIELAB 色差至少 16，跟地圖底色 #EEDFCC 的色差至少 43；超過 10 天才循環。
+ */
+export const DAY_COLORS = [
+  '#4F7CAC', // 霧藍
+  '#C9733C', // 焦糖橘
+  '#6E8B5B', // 橄欖綠
+  '#8A6BA0', // 灰紫
+  '#B8912F', // 芥末黃
+  '#A8524A', // 磚紅
+  '#3E8C84', // 青綠
+  '#C2718A', // 乾燥玫瑰
+  '#3F5A7A', // 深藍灰
+  '#7B5638', // 可可棕
+]
 
 export function dayColor(i: number): string {
   return DAY_COLORS[i % DAY_COLORS.length]
