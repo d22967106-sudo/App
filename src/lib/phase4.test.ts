@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { calendarDays, categoryTotals, comparePeriod, eachDate, expenseSeries, firstWeekday, shiftMonth, sumExpenseUntil } from './stats'
 import { dayColor, dayDashed, dayTitle, formatTripRange, mergeTrips, normalizeSegments, tripDates, tripDaysText, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
 import { formatBytes, yearsLeft, yearsText } from './usage'
-import { videoFrameAt, type PosterInput } from './poster'
+import { videoFrameAt } from './posterTimeline'
+import type { PosterInput } from './poster'
 import type { Entry, TrackPoint, Trip } from './types'
 
 let seq = 0
