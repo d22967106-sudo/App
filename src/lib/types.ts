@@ -80,6 +80,8 @@ export interface TrackPoint {
   source: 'checkin' | 'auto'
   /** 地名，例如「抵達 公司」的「公司」 */
   label?: string
+  /** 只在畫面上用、不存檔：從前一天最後位置延續過來的點（值＝原本那一點的時間） */
+  carriedFrom?: number
 }
 
 /** 旅程的一段日期（含頭尾） */

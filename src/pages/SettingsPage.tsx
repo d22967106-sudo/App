@@ -8,6 +8,8 @@ import { goBack, navigate, useLiveQuery } from '../lib/hooks'
 import { onCloudChange } from '../lib/cloud'
 import { cloudReady } from '../lib/sync'
 import { AutomationSection } from './AutomationSection'
+import { TRAVEL_MODES, type TravelMode } from '../lib/legs'
+import { getRouteSettings, onRouteSettingsChange, saveRouteSettings, type RouteSettings } from '../lib/snap'
 import { CloudSection } from './CloudSection'
 
 /** 設定：雲端同步、自動化、地圖樣式、使用狀況、備份（從統計頁右上齒輪進來） */
@@ -93,6 +95,8 @@ export function SettingsPage() {
 
         <AutomationSection />
 
+        <RouteSection />
+
         <section className="card" aria-label="地圖樣式">
           <h2 className="section-title">地圖樣式</h2>
           <MapStylePicker />
@@ -171,5 +175,45 @@ export function SettingsPage() {
         </p>
       </div>
     </div>
+  )
+}
+
+/** 路線：貼齊道路、預設交通方式 */
+function RouteSection() {
+  const [st, setSt] = useState<RouteSettings | null>(null)
+  useEffect(() => {
+    const load = () => getRouteSettings().then(setSt)
+    load()
+    return onRouteSettingsChange(load)
+  }, [])
+  if (!st) return null
+  return (
+    <section className="card stack" aria-label="路線">
+      <h2 className="section-title" style={{ margin: 0 }}>
+        路線
+      </h2>
+      <label className="kv" style={{ alignItems: 'center' }}>
+        <span>
+          貼齊道路
+          <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+            把背景定位的路線吸附到真正的道路上；關掉就畫原本的直線
+          </span>
+        </span>
+        <input type="checkbox" checked={st.snap} onChange={(e) => saveRouteSettings({ snap: e.target.checked })} style={{ width: 22, height: 22 }} />
+      </label>
+      <label className="kv" style={{ alignItems: 'center' }}>
+        <span>預設交通方式</span>
+        <select className="text-input" style={{ width: 'auto', minHeight: 36 }} value={st.mode} onChange={(e) => saveRouteSettings({ mode: e.target.value as TravelMode })}>
+          {TRAVEL_MODES.filter((m) => m.id !== 'none').map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p className="hint" style={{ margin: 0 }}>
+        很慢的路段自動當走路、很快的（火車、高鐵）不貼齊；每一段也可以在地圖上點開後自己改。比對用 OpenStreetMap 社群的免費服務（FOSSGIS 的 Valhalla），每段只送一次、結果存在手機上；連不上時先畫直線。
+      </p>
+    </section>
   )
 }

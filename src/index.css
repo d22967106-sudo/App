@@ -3050,3 +3050,135 @@ button:disabled {
 .trip-seg-head .seg-del {
   height: 32px;
 }
+
+/* ── 一段一段的移動 ── */
+
+.snap-chip {
+  position: absolute;
+  top: calc(var(--safe-top) + 70px);
+  left: 16px;
+  z-index: 600;
+  background: var(--card);
+  border-radius: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-body);
+  box-shadow: 0 2px 8px rgba(58, 38, 24, 0.08);
+  max-width: calc(100% - 32px);
+}
+
+.leg-card {
+  position: absolute;
+  top: calc(var(--safe-top) + 70px);
+  left: 16px;
+  right: 16px;
+  z-index: 650;
+  background: var(--card);
+  border-radius: 18px;
+  box-shadow: 0 4px 16px rgba(58, 38, 24, 0.16);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leg-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.leg-card-head strong {
+  font-size: 16px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.leg-all {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
+  color: var(--text-body);
+  font: inherit;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.leg-stats {
+  display: grid;
+  grid-template-columns: 1.6fr 1fr 1fr 1fr;
+  gap: 6px;
+}
+
+.leg-stats div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.leg-stats span {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.leg-stats b {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.leg-mode {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.leg-mode select {
+  height: 34px;
+  max-width: 62%;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 0 10px;
+}
+
+.leg-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.leg-nav button {
+  flex: 1;
+  height: 36px;
+  border: none;
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.leg-nav button:disabled {
+  opacity: 0.4;
+}
+
+.row .badge.leg {
+  background: var(--soft);
+  color: var(--primary);
+}
+
+.leg-row.selected .badge.leg {
+  background: var(--primary-dark);
+  color: #fff;
+}

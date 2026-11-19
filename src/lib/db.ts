@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction, type StoreNames } from 'idb'
-import { toDateKey } from './ledger'
+import { shiftDate, toDateKey } from './ledger'
 import type { DailySteps, DailySummary, Entry, Photo, Place, RateCache, TrackPoint, Trip } from './types'
 
 /** 會同步到雲端的資料表 */
@@ -254,6 +254,12 @@ export async function getStepsInRange(start: string, end: string): Promise<Daily
 
 export async function getSummariesInRange(start: string, end: string): Promise<DailySummary[]> {
   return (await getDB()).getAll('summaries', IDBKeyRange.bound(start, end))
+}
+
+/** 前幾天的軌跡（找「前一天最後的位置」用；不含 date 當天） */
+export async function getTrackBefore(date: string, days = 14): Promise<TrackPoint[]> {
+  const list = await (await getDB()).getAllFromIndex('track', 'date', IDBKeyRange.bound(shiftDate(date, -days), date, false, true))
+  return list.sort((a, b) => a.time - b.time)
 }
 
 export async function getAllTrack(): Promise<TrackPoint[]> {

@@ -1,22 +1,54 @@
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Icon } from '../components/Icon'
-import { MapView, type MapMarker } from '../components/MapView'
+import { MapView, type MapMarker, type MapRoute } from '../components/MapView'
 import { MapStyleSheet } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
 import { formatTwd } from '../lib/currency'
-import { buildRoute, buildTimeline, dayStats, dayStays, type RoutePoint } from '../lib/day'
-import { getEntriesByDate, getMeta, getPhoto, getSteps, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
+import { buildRoute, buildTimeline, dayStats, dayStays, type RoutePoint, type TimelineItem } from '../lib/day'
+import { getEntriesByDate, getMeta, getPhoto, getSteps, getTrackBefore, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
 import { entrySubtitle, entryTitle, shortAmount } from '../lib/display'
 import { getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
+import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
+import { getLegModes, getRouteSettings, onRouteSettingsChange, setLegMode, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
+const PRIMARY = '#A0612B'
+const LEG_ON = '#7A4A20'
+const LEG_OFF = '#C9AE93'
+/** 選了一段時面板的高度 */
+const LEG_SHEET_H = 150
+
+/** 28 分、1 小時 5 分 */
+function formatDuration(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60000))
+  return min < 60 ? `${min} 分` : `${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}`
+}
+
+/** 11/19 22:10 */
+function formatShort(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getMonth() + 1}/${d.getDate()} ${formatTime(ms)}`
+}
+
+/** 路線設定與手動選的交通方式（設定頁改了會跟著變） */
+function useRouteSettings(): { settings: RouteSettings; legModes: Record<string, TravelMode> } {
+  const [st, setSt] = useState<{ settings: RouteSettings; legModes: Record<string, TravelMode> }>({ settings: DEFAULT_ROUTE_SETTINGS, legModes: {} })
+  useEffect(() => {
+    const load = () => Promise.all([getRouteSettings(), getLegModes()]).then(([settings, legModes]) => setSt({ settings, legModes }))
+    load()
+    return onRouteSettingsChange(load)
+  }, [])
+  return st
+}
+
+type Item = TimelineItem | { type: 'leg'; time: number; leg: Leg }
 
 /** 每筆紀錄第一張照片的縮圖網址，給地圖用 */
 function useThumbUrls(entries: Entry[] | undefined): Record<string, string> {
@@ -84,26 +116,116 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
 
   useEffect(() => setSelected(null), [date])
 
-  const route = useMemo(() => buildRoute(entries ?? [], track ?? []), [entries, track])
-  const stays = useMemo(() => dayStays(track ?? []), [track])
+  // 接上前一天的最後位置：今天 0 點時人就在那裡（今天沒收到點也看得到在哪）
+  const before = useLiveQuery(() => (date <= today ? getTrackBefore(date) : Promise.resolve([])), [date, today])
+  const rawTrack = track
+  const fullTrack = useMemo(() => (rawTrack ? withCarry(rawTrack, before ? carryPoint(date, before) : null) : undefined), [rawTrack, before, date])
+
+  const route = useMemo(() => buildRoute(entries ?? [], fullTrack ?? []), [entries, fullTrack])
+  const stays = useMemo(() => dayStays(fullTrack ?? []), [fullTrack])
   const stayNames = useStayNames(stays, entries)
-  const timeline = useMemo(() => buildTimeline(entries ?? [], track ?? [], stays), [entries, track, stays])
-  const stats = useMemo(() => dayStats(entries ?? [], track ?? [], stays), [entries, track, stays])
+  const timeline = useMemo(() => buildTimeline(entries ?? [], fullTrack ?? [], stays), [entries, fullTrack, stays])
+  const stats = useMemo(() => dayStats(entries ?? [], fullTrack ?? [], stays), [entries, fullTrack, stays])
   // 最後位置不管精確度，只要有收到就標出來（看得出資料有進來）
-  const lastAuto = useMemo(() => (track ?? []).filter(isAuto).sort((a, b) => a.time - b.time).at(-1) ?? null, [track])
+  const lastAuto = useMemo(() => (fullTrack ?? []).filter(isAuto).sort((a, b) => a.time - b.time).at(-1) ?? null, [fullTrack])
+
+  // ── 一段一段的移動、交通方式、貼齊道路 ──
+  const legs = useMemo(() => computeLegs(fullTrack ?? [], stays), [fullTrack, stays])
+  const { settings: routeSettings, legModes } = useRouteSettings()
+  const modeOf = useCallback(
+    (l: Leg): { mode: TravelMode; auto: boolean } => {
+      const manual = legModes[`${date}/${l.id}`]
+      return manual ? { mode: manual, auto: false } : { mode: guessMode(l, routeSettings.mode), auto: true }
+    },
+    [legModes, date, routeSettings.mode],
+  )
+  const [snapped, setSnapped] = useState<Record<string, GeoPoint[] | null | 'pending'>>({})
+  const snapKey = legs.map((l) => `${l.id}:${l.points.length}:${modeOf(l).mode}`).join('|') + `#${routeSettings.snap}`
+  useEffect(() => {
+    if (!routeSettings.snap) {
+      setSnapped({})
+      return
+    }
+    let alive = true
+    setSnapped(Object.fromEntries(legs.filter((l) => modeOf(l).mode !== 'none').map((l) => [l.id, 'pending' as const])))
+    ;(async () => {
+      for (const l of legs) {
+        const mode = modeOf(l).mode
+        if (mode === 'none') continue
+        const pts = await snapLeg(l.points, mode)
+        if (!alive) return
+        setSnapped((s) => ({ ...s, [l.id]: pts }))
+      }
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapKey])
+  const legLine = (l: Leg): GeoPoint[] => {
+    const sp = snapped[l.id]
+    return sp && sp !== 'pending' ? sp : l.points
+  }
+  const [legSel, setLegSel] = useState<string | null>(null)
+  useEffect(() => setLegSel(null), [date])
+  const pickedLeg = legs.find((l) => l.id === legSel) ?? null
+  const snapStatus = useMemo(() => {
+    if (!routeSettings.snap) return null
+    const vals = legs.filter((l) => modeOf(l).mode !== 'none').map((l) => snapped[l.id])
+    if (!vals.length) return null
+    if (vals.some((v) => v === 'pending')) return '貼齊道路中…'
+    if (vals.every((v) => v)) return `已貼齊道路（${modeName(routeSettings.mode)}）`
+    return vals.some((v) => v) ? '部分路段沒有貼齊（連不上服務或比對失敗）' : '貼齊道路失敗，先畫直線'
+  }, [legs, snapped, routeSettings, modeOf])
+
+  // 有背景定位的移動時，地圖畫一段一段的路線（可以點）；否則照舊連紀錄和定位點
+  const mapRoutes = useMemo<MapRoute[] | undefined>(() => {
+    if (!legs.length) return undefined
+    return legs.map((l) =>
+      !legSel
+        ? { id: l.id, points: legLine(l), color: PRIMARY }
+        : l.id === legSel
+          ? { id: l.id, points: legLine(l), color: LEG_ON, weight: 7 }
+          : { id: l.id, points: legLine(l), color: LEG_OFF, weight: 4, opacity: 0.75, noCasing: true },
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [legs, snapped, legSel])
+
+  const items = useMemo<Item[]>(() => {
+    if (!legs.length) return timeline
+    // 「離開 ○○」併進「移動」那一列
+    const leaving = new Set(legs.map((l) => l.from?.id).filter(Boolean))
+    return [
+      ...timeline.filter((it) => !(it.type === 'stay' && it.edge === 'leave' && leaving.has(it.stay.id))),
+      ...legs.map((leg) => ({ type: 'leg' as const, time: leg.start, leg })),
+    ].sort((a, b) => a.time - b.time)
+  }, [timeline, legs])
+
+  const placeName = (stay: Leg['from']) => (stay ? (stayNames[stay.id] ?? '…') : null)
+  const legTitle = (l: Leg, i: number) => {
+    const from = placeName(l.from) ?? (i === 0 ? '起點' : '…')
+    const to = placeName(l.to) ?? (date === today && i === legs.length - 1 ? '目前位置' : '終點')
+    return `${from} → ${to}`
+  }
 
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = []
-    const manual = (track ?? []).filter((t) => !isAuto(t))
+    const manual = (fullTrack ?? []).filter((t) => !isAuto(t))
     const firstTrack = manual[0]
     // 背景定位：起點一個標記，停留的地方各一個標記（路上經過的點只畫線）
     const first = route[0]
     if (first && first.ref.type === 'track' && route.length > 1 && !manual.some((t) => t.id === first.ref.id)) {
-      out.push({ id: first.ref.id, lat: first.lat, lng: first.lng, kind: 'start', label: `${formatTime(first.time)} 出發` })
+      out.push({ id: first.ref.id, lat: first.lat, lng: first.lng, kind: 'start', label: `${formatTime(legs[0]?.start ?? first.time)} 出發` })
     }
     // 背景定位的最後位置（還沒有停留、也還沒移動時，至少看得到資料有進來）
     if (lastAuto && !out.some((m) => m.id === lastAuto.id)) {
-      out.push({ id: lastAuto.id, lat: lastAuto.lat, lng: lastAuto.lng, kind: 'checkin', label: `${formatTime(lastAuto.time)} 最後位置` })
+      out.push({
+        id: lastAuto.id,
+        lat: lastAuto.lat,
+        lng: lastAuto.lng,
+        kind: 'checkin',
+        label: isCarry(lastAuto) ? `整天在這裡（最後更新 ${formatShort(lastAuto.carriedFrom!)}）` : `${formatTime(lastAuto.time)} 最後位置`,
+      })
     }
     for (const s of stays) {
       out.push({
@@ -136,7 +258,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       })
     }
     return out
-  }, [entries, track, thumbs, route, stays, stayNames, lastAuto])
+  }, [entries, fullTrack, thumbs, route, stays, stayNames, lastAuto, legs])
 
   // ── 播放當天行程 ──
   const [playhead, setPlayhead] = useState<GeoPoint | null>(null)
@@ -236,19 +358,34 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   }, [selected])
 
   const loaded = entries && track
+  const legIndex = pickedLeg ? legs.indexOf(pickedLeg) : -1
+  const pickLeg = (id: string | null) => {
+    setLegSel(id)
+    if (id) {
+      setSelected(null)
+      // 上面有卡片，面板收到最低，地圖才有空間顯示這一段
+      setSheetH(LEG_SHEET_H)
+    }
+  }
 
   return (
     <div className="map-page" style={{ "--sheet-h": `${height}px` } as React.CSSProperties}>
       <MapView
         route={route}
+        routes={mapRoutes}
+        onRouteClick={(id) => pickLeg(id === legSel ? null : id)}
+        focus={pickedLeg ? legLine(pickedLeg) : null}
         markers={markers}
         selectedId={selected}
-        onSelect={(id) => setSelected(id)}
+        onSelect={(id) => {
+          setLegSel(null)
+          setSelected(id)
+        }}
         playhead={playhead}
         myLocation={myPos}
         fallbackCenter={lastPos ?? TAIPEI}
-        bottomPadding={peek + 56}
-        topPadding={70}
+        bottomPadding={(pickedLeg ? LEG_SHEET_H : peek) + 56}
+        topPadding={pickedLeg ? 260 : 70}
         ariaLabel={`${formatDateLong(date)}的路線地圖`}
       />
 
@@ -280,6 +417,24 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           />
         </label>
       </div>
+
+      {pickedLeg ? (
+        <LegCard
+          leg={pickedLeg}
+          title={legTitle(pickedLeg, legIndex)}
+          mode={modeOf(pickedLeg)}
+          autoMode={guessMode(pickedLeg, routeSettings.mode)}
+          snapOn={routeSettings.snap}
+          hasPrev={legIndex > 0}
+          hasNext={legIndex < legs.length - 1}
+          onPrev={() => pickLeg(legs[legIndex - 1].id)}
+          onNext={() => pickLeg(legs[legIndex + 1].id)}
+          onClose={() => pickLeg(null)}
+          onMode={(m) => setLegMode(date, pickedLeg.id, m)}
+        />
+      ) : (
+        snapStatus && <div className="snap-chip">{snapStatus}</div>
+      )}
 
       <div className="map-actions" style={{ bottom: `calc(var(--tabbar-h) + ${height + 16}px)` }} hidden={expanded}>
         <button className="checkin-btn" onClick={() => setShowStyles(true)} aria-label="地圖樣式">
@@ -316,18 +471,37 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
                 {stats.records} 則紀錄 · {stats.photos} 張照片
               </span>
               {steps && <span>{steps.steps.toLocaleString('en-US')} 步</span>}
-              {lastAuto && <span>背景定位 {formatTime(lastAuto.time)}</span>}
+              {lastAuto && <span>背景定位 {isCarry(lastAuto) ? formatShort(lastAuto.carriedFrom!) : formatTime(lastAuto.time)}</span>}
             </div>
           </div>
         </div>
         <div className="sheet-body" ref={listRef}>
-          {loaded && timeline.length === 0 && (
+          {loaded && items.length === 0 && (
             <div className="sheet-empty">
               {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆' : '這天沒有紀錄'}
             </div>
           )}
-          {timeline.map((item) =>
-            item.type === 'stay' ? (
+          {items.map((item) =>
+            item.type === 'leg' ? (
+              <button
+                key={item.leg.id}
+                data-id={item.leg.id}
+                className={`row track-row leg-row${legSel === item.leg.id ? ' selected' : ''}`}
+                aria-pressed={legSel === item.leg.id}
+                onClick={() => pickLeg(legSel === item.leg.id ? null : item.leg.id)}
+              >
+                <span className="time">{formatTime(item.time)}</span>
+                <span className="badge leg">
+                  <Icon name="trip" size={18} />
+                </span>
+                <span className="main">
+                  <span className="title">移動 · {legTitle(item.leg, legs.indexOf(item.leg))}</span>
+                  <span className="sub">
+                    {item.leg.km} km · {formatDuration(item.leg.end - item.leg.start)} · {modeName(modeOf(item.leg).mode)}
+                  </span>
+                </span>
+              </button>
+            ) : item.type === 'stay' ? (
               <button
                 key={`${item.stay.id}-${item.edge}`}
                 data-id={item.edge === 'arrive' ? item.stay.id : undefined}
@@ -369,7 +543,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
               />
             ),
           )}
-          {loaded && timeline.length > 0 && (
+          {loaded && items.length > 0 && (
             <div className="sheet-foot">
               <button className="btn-outline" onClick={() => navigate(`day/${date}`)}>
                 查看完整回顧
@@ -427,5 +601,82 @@ function EntryRow({
         </button>
       )}
     </div>
+  )
+}
+
+function LegCard({
+  leg,
+  title,
+  mode,
+  autoMode,
+  snapOn,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+  onClose,
+  onMode,
+}: {
+  leg: Leg
+  title: string
+  mode: { mode: TravelMode; auto: boolean }
+  autoMode: TravelMode
+  snapOn: boolean
+  hasPrev: boolean
+  hasNext: boolean
+  onPrev: () => void
+  onNext: () => void
+  onClose: () => void
+  onMode: (m: TravelMode | null) => void
+}) {
+  const dur = leg.end - leg.start
+  return (
+    <section className="leg-card" aria-label={`移動：${title}`}>
+      <div className="leg-card-head">
+        <strong>{title}</strong>
+        <button className="leg-all" onClick={onClose}>
+          看全天
+        </button>
+      </div>
+      <div className="leg-stats">
+        <div>
+          <span>時間</span>
+          <b>
+            {formatTime(leg.start)}–{formatTime(leg.end)}
+          </b>
+        </div>
+        <div>
+          <span>距離</span>
+          <b>{leg.km} km</b>
+        </div>
+        <div>
+          <span>花了</span>
+          <b>{formatDuration(dur)}</b>
+        </div>
+        <div>
+          <span>平均</span>
+          <b>{Math.round(leg.avgKmh)} km/h</b>
+        </div>
+      </div>
+      <label className="leg-mode">
+        <span>交通方式{snapOn ? '' : '（貼齊道路已關閉）'}</span>
+        <select value={mode.auto ? '' : mode.mode} onChange={(e) => onMode((e.target.value || null) as TravelMode | null)}>
+          <option value="">自動判斷（{modeName(autoMode)}）</option>
+          {TRAVEL_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="leg-nav">
+        <button disabled={!hasPrev} onClick={onPrev}>
+          ‹ 上一段
+        </button>
+        <button disabled={!hasNext} onClick={onNext}>
+          下一段 ›
+        </button>
+      </div>
+    </section>
   )
 }
