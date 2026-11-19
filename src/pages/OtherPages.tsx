@@ -220,7 +220,7 @@ export function StatsPage() {
         </section>
 
         <p className="muted" style={{ fontSize: 12, textAlign: 'center' }}>
-          記帳日記 · 第 3 階段 · {__BUILD_DATE__}
+          摳摳手帳 · 第 3 階段 · {__BUILD_DATE__}
         </p>
       </div>
     </div>

@@ -1,4 +1,4 @@
-// 記帳日記 小工具（Scriptable）　版本 2026-11-18.6
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-19.1
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -196,7 +196,7 @@ function routeImage(route, size) {
 function errorWidget(msg) {
   const w = new ListWidget()
   w.backgroundColor = C.bg
-  text(w, '記帳日記', 13, C.primary, true)
+  text(w, '摳摳手帳', 13, C.primary, true)
   w.addSpacer(6)
   const t = w.addText(msg)
   t.font = Font.systemFont(11)

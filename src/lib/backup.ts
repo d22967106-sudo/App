@@ -78,7 +78,7 @@ export async function buildBackup(
   const data = await zipAsync(files)
   return {
     blob: new Blob([data as BlobPart], { type: 'application/zip' }),
-    filename: `記帳日記備份-${toDateKey(new Date())}.zip`,
+    filename: `摳摳手帳備份-${toDateKey(new Date())}.zip`,
     counts: {
       entries: all.entries.length,
       summaries: all.summaries.length,
@@ -95,9 +95,9 @@ const mimeOf = (name: string) =>
 export async function restoreBackup(file: Blob): Promise<{ entries: number; photos: number }> {
   const files = await unzipAsync(await blobBytes(file))
   const raw = files['data.json']
-  if (!raw) throw new Error('這不是記帳日記的備份檔（找不到 data.json）')
+  if (!raw) throw new Error('這不是摳摳手帳的備份檔（找不到 data.json）')
   const json = JSON.parse(strFromU8(raw)) as BackupJson
-  if (json.format !== BACKUP_FORMAT) throw new Error('這不是記帳日記的備份檔')
+  if (json.format !== BACKUP_FORMAT) throw new Error('這不是摳摳手帳的備份檔')
   if (json.version > BACKUP_VERSION) throw new Error('備份檔版本比 App 新，請先更新 App')
   const photos: Photo[] = []
   for (const m of json.photos ?? []) {

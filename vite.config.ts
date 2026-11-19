@@ -18,8 +18,8 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: '記帳日記',
-        short_name: '記帳日記',
+        name: '摳摳手帳',
+        short_name: '摳摳手帳',
         description: '記帳＋日記＋照片＋生活軌跡',
         lang: 'zh-Hant-TW',
         start_url: base,
