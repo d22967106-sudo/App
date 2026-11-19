@@ -221,7 +221,7 @@
   - **交通方式**：自動判斷（`guessMode`：平均 < 7 km/h＝走路、最高 > 90 km/h＝不貼齊、其他＝預設）；卡片上可手動改（存 meta `route.legModes`，key＝日期/段 id＝`leg-<出發毫秒>`）；設定頁「路線」：貼齊道路開關、預設交通方式（預設機車），存 meta `route.settings`。
   - **貼齊道路**（`snap.ts`）：GET `https://valhalla1.openstreetmap.de/trace_route?json=`（`encoded_polyline` 6 位小數、`shape_match: map_snap`、costing：機車 motor_scooter／汽車 auto／走路 pedestrian／公車 bus），每次間隔 1.1 秒、一次最多 250 點（太長切開）；結果存 meta `snap.<mode>.<點的雜湊>`，同樣的點不再送；失敗記下來 1 小時內不重試、畫原本的直線；貼齊後比原本長 2.5 倍以上＝比對錯了，不用。地圖左上角小標籤：已貼齊道路（機車）／貼齊道路中…／部分路段沒有貼齊。
   - 測試：`src/lib/legs.test.ts` 7 項（切段、飄移不算、猜交通方式、延續點、polyline 編解碼、Valhalla 假伺服器＋快取＋失敗），全部 116 項；Playwright 用假的 Valhalla 回應看過切段、選一段、改交通方式、延續點、設定頁。
-  - **沒辦法在開發環境確認的**：Valhalla 伺服器實際能不能從 iPhone 連（CORS）、比對結果準不準、地名（開發環境查不到，顯示「…」）。
+  - 2026-11-19 使用者 iPhone 實測：**貼齊道路成功，路線「準確多了」**（Valhalla 從 iPhone 連得到）。
 - 掃發票先不做；停留提醒、軌跡精簡不做（見上）。
 
 ## 已知問題
