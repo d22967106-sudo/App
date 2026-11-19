@@ -4,8 +4,9 @@ import { formatNumber, formatTwd } from '../lib/currency'
 import { dayStats } from '../lib/day'
 import { getAllTrips, getEntriesByDate, getEntriesInRange, getSteps, getSummariesInRange, getSummary, getTrackByDate } from '../lib/db'
 import { navigate, useLiveQuery } from '../lib/hooks'
-import { formatDateLong, isDateKey, relativeDayLabel, toDateKey, totalTwd } from '../lib/ledger'
+import { formatDateLong, isDateKey, relativeDayLabel, shiftDate, toDateKey, totalTwd } from '../lib/ledger'
 import { calendarDays, daysInMonth, firstWeekday, monthRange, shiftMonth } from '../lib/stats'
+import { tripDates, tripLength } from '../lib/trips'
 import type { Trip } from '../lib/types'
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六']
@@ -19,7 +20,10 @@ export function CalendarPage({ month: monthParam, selected: selParam }: { month:
 
   const data = useLiveQuery(async () => {
     const [entries, summaries, trips] = await Promise.all([getEntriesInRange(start, end), getSummariesInRange(start, end), getAllTrips()])
-    return { entries, summaries, trips: trips.filter((t) => t.start <= end && t.end >= start) }
+    const inMonth = trips
+      .filter((t) => t.start <= end && t.end >= start)
+      .map((trip) => ({ trip, dates: new Set(tripDates(trip)) }))
+    return { entries, summaries, trips: inMonth }
   }, [start, end])
 
   const days = data ? calendarDays(month, data.entries, data.summaries) : new Map()
@@ -76,10 +80,12 @@ export function CalendarPage({ month: monthParam, selected: selParam }: { month:
           if (!date) return <span key={`e${i}`} />
           const d = days.get(date)
           const future = date > today
-          const trip = data?.trips.find((t) => date >= t.start && date <= t.end)
+          const hit = data?.trips.find((t) => t.dates.has(date))
+          const trip = hit?.trip
           const col = i % 7
-          const bandStart = trip && (date === trip.start || col === 0)
-          const bandEnd = trip && (date === trip.end || col === 6 || date === end)
+          // 每一段各自一條橫條：前一天不在旅程裡就是開頭，後一天不在就是結尾
+          const bandStart = !!hit && (!hit.dates.has(shiftDate(date, -1)) || col === 0)
+          const bandEnd = !!hit && (!hit.dates.has(shiftDate(date, 1)) || col === 6 || date === end)
           const label = [
             formatDateLong(date),
             trip ? `${trip.name}旅程` : '',
@@ -109,7 +115,7 @@ export function CalendarPage({ month: monthParam, selected: selParam }: { month:
               ) : null}
               {trip && (
                 <span className={`band${bandStart ? ' start' : ''}${bandEnd ? ' end' : ''}`}>
-                  {bandStart && <TripBandLabel trip={trip} date={date} col={col} />}
+                  {bandStart && <TripBandLabel trip={trip} first={!hit!.dates.has(shiftDate(date, -1))} col={col} />}
                 </span>
               )}
             </button>
@@ -122,11 +128,14 @@ export function CalendarPage({ month: monthParam, selected: selParam }: { month:
   )
 }
 
-function TripBandLabel({ trip, date, col }: { trip: Trip; date: string; col: number }) {
-  // 只在旅程開始那格（或換週的第一格）顯示名稱
-  const days = Math.round((Date.parse(trip.end) - Date.parse(trip.start)) / 86400000) + 1
-  const text = date === trip.start ? `${trip.name} ${days} 天` : trip.name
-  return <span className="band-label" style={{ maxWidth: `${(7 - col) * 100}%` }}>{text}</span>
+function TripBandLabel({ trip, first, col }: { trip: Trip; first: boolean; col: number }) {
+  // 每段開頭寫「名稱 N 天」，換週的那一格只寫名稱
+  const text = first ? `${trip.name} ${tripLength(trip)} 天` : trip.name
+  return (
+    <span className="band-label" style={{ maxWidth: `${(7 - col) * 100}%` }}>
+      {text}
+    </span>
+  )
 }
 
 function DayCard({ date }: { date: string }) {

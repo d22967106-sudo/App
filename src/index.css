@@ -2864,3 +2864,189 @@ button:disabled {
 .usage-table .kv {
   padding: 3px 0;
 }
+
+/* ── 多段日期的旅程 ── */
+
+.seg-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-2);
+  margin-bottom: -4px;
+}
+
+.trip-seg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trip-seg .lbl {
+  width: 44px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.trip-seg input {
+  flex: 1;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: 15px;
+}
+
+.trip-seg.merged {
+  justify-content: space-between;
+  background: var(--soft);
+  border-radius: 12px;
+  padding: 6px 4px 6px 12px;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.seg-del {
+  width: 36px;
+  height: 40px;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.seg-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.seg-actions button {
+  flex: 1;
+  min-height: 42px;
+  border: 1px dashed var(--muted-dot);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.merge-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.merge-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+
+.merge-row input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.merge-row span {
+  display: flex;
+  flex-direction: column;
+}
+
+.merge-row strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.merge-row small {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.trip-day-title.gap,
+.trip-days button.gap {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+/* ── 軌跡影片 ── */
+
+.poster-page .entry-head .segmented.small.two button {
+  padding: 0 18px;
+  height: 36px;
+  font-size: 14px;
+}
+
+.segmented.small.three {
+  grid-template-columns: repeat(3, auto);
+}
+
+.segmented.small.three button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+.poster-preview video,
+.poster-preview .live-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: #fbf6ef;
+}
+
+.poster-preview .live {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.poster-preview .live:empty {
+  display: none;
+}
+
+.poster-preview .spinner {
+  position: relative;
+  z-index: 1;
+}
+
+.rec-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-body);
+}
+
+.rec-progress .meter {
+  width: 100%;
+}
+
+.trip-seg-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trip-seg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: var(--text-body);
+  margin-bottom: -4px;
+}
+
+.trip-seg-head .seg-del {
+  height: 32px;
+}

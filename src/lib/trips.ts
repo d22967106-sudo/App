@@ -4,7 +4,7 @@ import { countPlaces, distanceM } from './geo'
 import { shiftDate, sumMoney, totalTwd } from './ledger'
 import { eachDate } from './stats'
 import { isAuto, usableAutoPoints } from './stays'
-import type { DailySteps, Entry, GeoPoint, TrackPoint, Trip } from './types'
+import type { DailySteps, Entry, GeoPoint, TrackPoint, Trip, TripSegment } from './types'
 
 /**
  * 旅程每天的顏色（使用者 2026-11-19 選定「咖啡色 10 色 × 實線／虛線」）：
@@ -33,8 +33,62 @@ export function dayDashed(i: number): boolean {
   return Math.floor(i / DAY_COLORS.length) % 2 === 1
 }
 
-export function tripLength(trip: Pick<Trip, 'start' | 'end'>): number {
-  return eachDate(trip.start, trip.end).length
+/** 整理日期段：去掉不合法的、排序、重疊或相連的合併 */
+export function normalizeSegments(list: TripSegment[]): TripSegment[] {
+  const ok = list.filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s.start) && /^\d{4}-\d{2}-\d{2}$/.test(s.end) && s.start <= s.end)
+  ok.sort((a, b) => a.start.localeCompare(b.start))
+  const out: TripSegment[] = []
+  for (const s of ok) {
+    const last = out[out.length - 1]
+    if (last && s.start <= shiftDate(last.end, 1)) {
+      if (s.end > last.end) last.end = s.end
+    } else out.push({ ...s })
+  }
+  return out
+}
+
+/** 旅程的每一段（舊資料沒有 segments 就是 start～end） */
+export function tripSegments(trip: Pick<Trip, 'start' | 'end' | 'segments'>): TripSegment[] {
+  return trip.segments?.length ? normalizeSegments(trip.segments) : [{ start: trip.start, end: trip.end }]
+}
+
+/** 旅程實際的每一天（只算有出門的日子） */
+export function tripDates(trip: Pick<Trip, 'start' | 'end' | 'segments'>): string[] {
+  return tripSegments(trip).flatMap((s) => eachDate(s.start, s.end))
+}
+
+export function tripLength(trip: Pick<Trip, 'start' | 'end' | 'segments'>): number {
+  return tripDates(trip).length
+}
+
+/** 第幾天的小標題（新版存在 titles，舊版照順序存在 dayTitles） */
+export function dayTitle(trip: Pick<Trip, 'dayTitles' | 'titles'>, date: string, index: number): string {
+  return (trip.titles?.[date] ?? trip.dayTitles[index] ?? '').trim()
+}
+
+/** 把每天的小標題換成用日期存（舊資料的 dayTitles 照順序對應） */
+export function titlesByDate(trip: Trip): Record<string, string> {
+  const out: Record<string, string> = {}
+  tripDates(trip).forEach((d, i) => {
+    const t = dayTitle(trip, d, i)
+    if (t) out[d] = t
+  })
+  return out
+}
+
+/** 把其他旅程併進來：日期段合在一起、小標題保留 */
+export function mergeTrips(base: Trip, others: Trip[]): Trip {
+  const segments = normalizeSegments([...tripSegments(base), ...others.flatMap((t) => tripSegments(t))])
+  const titles = Object.assign({}, ...others.map(titlesByDate), titlesByDate(base))
+  return {
+    ...base,
+    segments,
+    start: segments[0].start,
+    end: segments[segments.length - 1].end,
+    titles,
+    dayTitles: [],
+    coverPhotoId: base.coverPhotoId ?? others.find((t) => t.coverPhotoId)?.coverPhotoId ?? null,
+  }
 }
 
 /** 2026/11/12 – 11/14（跨年就寫完整年份） */
@@ -43,6 +97,12 @@ export function formatTripRange(trip: Pick<Trip, 'start' | 'end'>): string {
   const [ey, em, ed] = trip.end.split('-').map(Number)
   if (trip.start === trip.end) return `${sy}/${sm}/${sd}`
   return sy === ey ? `${sy}/${sm}/${sd} – ${em}/${ed}` : `${sy}/${sm}/${sd} – ${ey}/${em}/${ed}`
+}
+
+/** 「3 天」或「7 天（3 段）」 */
+export function tripDaysText(trip: Pick<Trip, 'start' | 'end' | 'segments'>): string {
+  const n = tripSegments(trip).length
+  return `${tripLength(trip)} 天${n > 1 ? `（${n} 段）` : ''}`
 }
 
 // ── 旅程的資料 ──
@@ -84,8 +144,13 @@ function shortName(e: Entry): string | null {
   return area && area !== '未知地點' ? area : e.title.trim() || null
 }
 
-export function summarizeTrip(trip: Trip, entries: Entry[], track: TrackPoint[], steps: DailySteps[]): TripSummary {
-  const dates = eachDate(trip.start, trip.end)
+export function summarizeTrip(trip: Trip, allEntries: Entry[], allTrack: TrackPoint[], allSteps: DailySteps[]): TripSummary {
+  const dates = tripDates(trip)
+  // 多段旅程：中間沒出門的日子不算
+  const inTrip = new Set(dates)
+  const entries = allEntries.filter((e) => inTrip.has(e.date))
+  const track = allTrack.filter((t) => inTrip.has(t.date))
+  const steps = allSteps.filter((s) => inTrip.has(s.date))
   const spots: GeoPoint[] = []
   const days = dates.map((date, index): TripDay => {
     const es = entries.filter((e) => e.date === date).sort((a, b) => a.time - b.time)
@@ -111,7 +176,7 @@ export function summarizeTrip(trip: Trip, entries: Entry[], track: TrackPoint[],
       index,
       color: dayColor(index),
       dashed: dayDashed(index),
-      title: trip.dayTitles[index]?.trim() || '',
+      title: dayTitle(trip, date, index),
       route,
       expense: st.expense,
       km: st.km,
@@ -225,7 +290,7 @@ export function guessTripName(entries: Entry[]): string {
 export function suggestTrips(
   entries: Entry[],
   track: TrackPoint[],
-  trips: Pick<Trip, 'start' | 'end'>[],
+  trips: Pick<Trip, 'start' | 'end' | 'segments'>[],
   dismissed: string[],
   today: string,
 ): TripSuggestion[] {
@@ -253,7 +318,7 @@ export function suggestTrips(
     if (g.length < MIN_TRIP_DAYS) continue
     const s = { start: g[0], end: g[g.length - 1] }
     if (s.end >= today) continue
-    if (trips.some((t) => t.start <= s.end && t.end >= s.start)) continue
+    if (trips.some((t) => tripSegments(t).some((x) => x.start <= s.end && x.end >= s.start))) continue
     if (dismissed.includes(suggestionKey(s))) continue
     out.push({ ...s, name: guessTripName(entries.filter((e) => e.date >= s.start && e.date <= s.end)) })
   }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../components/Icon'
 import { MapView, type MapMarker } from '../components/MapView'
 import { PhotoImg, toast } from '../components/ui'
@@ -20,24 +20,29 @@ import {
 } from '../lib/db'
 import { goBack, navigate, useLiveQuery, useObjectUrl } from '../lib/hooks'
 import { getSyncStatus, missingTables, onSyncStatus } from '../lib/sync'
-import { isDateKey, toDateKey } from '../lib/ledger'
-import { renderPoster, type PosterBasemap, type PosterRatio } from '../lib/poster'
-import { eachDate } from '../lib/stats'
+import { isDateKey, shiftDate, toDateKey } from '../lib/ledger'
+import { canRecordVideo, recordVideo, renderPoster, type PosterBasemap, type PosterInput, type PosterRatio, type VideoResult } from '../lib/poster'
 import {
   dayColor,
   dayDashed,
   foreignText,
   formatTripRange,
   guessTripName,
+  mergeTrips,
+  normalizeSegments,
+  titlesByDate,
+  tripDates,
+  tripDaysText,
+  tripSegments,
   suggestionKey,
   suggestTrips,
   summarizeTrip,
   tripLength,
   type TripSummary,
 } from '../lib/trips'
-import type { GeoPoint, Trip } from '../lib/types'
+import type { GeoPoint, Trip, TripSegment } from '../lib/types'
 
-const MAX_DAYS = 60
+const MAX_DAYS = 90
 const DISMISSED_KEY = 'trip.dismissed'
 
 export function TripPage({ path, query }: { path: string[]; query: URLSearchParams }) {
@@ -205,7 +210,7 @@ function TripList() {
             <span className="info">
               <strong>{trip.name}</strong>
               <span className="muted">
-                {formatTripRange(trip)} · {tripLength(trip)} 天
+                {formatTripRange(trip)} · {tripDaysText(trip)}
               </span>
               <span>
                 {formatTwd(summary.expense)} · {formatNumber(Math.round(summary.km))} km · {summary.photos} 張照片
@@ -223,14 +228,24 @@ function TripList() {
 function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; start?: string | null; end?: string | null; name?: string | null }) {
   const today = toDateKey(new Date())
   const [trip, setTrip] = useState<Trip | null>(null)
+  /** 自己的日期段（編輯中，可能暫時不合法） */
+  const [segs, setSegs] = useState<TripSegment[]>([])
+  /** 每天的小標題（用日期當 key） */
+  const [titles, setTitles] = useState<Record<string, string>>({})
+  /** 要併進來的其他旅程（儲存時把它們刪掉） */
+  const [mergeIds, setMergeIds] = useState<string[]>([])
+  const [picking, setPicking] = useState(false)
   const [moreCovers, setMoreCovers] = useState(false)
   const [saving, setSaving] = useState(false)
+  const others = useLiveQuery(async () => (await getAllTrips()).filter((t) => t.id !== id), [id])
 
   useEffect(() => {
     if (id) {
       getTrip(id).then((t) => {
-        if (t) setTrip(t)
-        else navigate('trip', true)
+        if (!t) return navigate('trip', true)
+        setTrip(t)
+        setSegs(tripSegments(t))
+        setTitles(titlesByDate(t))
       })
       return
     }
@@ -238,24 +253,66 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
     const end = e0 && isDateKey(e0) && e0 >= start ? e0 : start
     const now = Date.now()
     setTrip({ id: newId(), name: n0 ?? '', start, end, dayTitles: [], coverPhotoId: null, createdAt: now, updatedAt: now })
+    setSegs([{ start, end }])
     if (!n0) getEntriesInRange(start, end).then((es) => setTrip((t) => (t && !t.name ? { ...t, name: guessTripName(es) === '旅程' ? '' : guessTripName(es) } : t)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const valid = !!trip && isDateKey(trip.start) && isDateKey(trip.end) && trip.start <= trip.end && tripLength(trip) <= MAX_DAYS
-  const summary = useLiveQuery(async () => (trip && valid ? loadSummary(trip) : null), [trip?.start, trip?.end, valid])
+  const merging = (others ?? []).filter((t) => mergeIds.includes(t.id))
+  const segError = segs.some((x) => !isDateKey(x.start) || !isDateKey(x.end))
+    ? '日期沒填完整'
+    : segs.some((x) => x.start > x.end)
+      ? '每一段的結束日期要在開始日期之後'
+      : null
+  const effective: Trip | null =
+    trip && !segError
+      ? merging.length
+        ? mergeTrips({ ...trip, segments: segs, titles }, merging)
+        : (() => {
+            const n = normalizeSegments(segs)
+            return n.length ? { ...trip, segments: n, start: n[0].start, end: n[n.length - 1].end } : null
+          })()
+      : null
+  const days = effective ? tripDates(effective) : []
+  const error = segError ?? (!effective ? '至少要有一段日期' : days.length > MAX_DAYS ? `一趟旅程最多 ${MAX_DAYS} 天` : null)
+  const effKey = effective ? JSON.stringify(tripSegments(effective)) : ''
+  const summary = useLiveQuery(async () => (effective && !error ? loadSummary(effective) : null), [effKey, !!error])
 
   if (!trip) return <div className="page no-tabbar" />
-  const days = valid ? eachDate(trip.start, trip.end) : []
   const set = (patch: Partial<Trip>) => setTrip({ ...trip, ...patch })
+  const setSeg = (i: number, patch: Partial<TripSegment>) =>
+    setSegs(segs.map((x, j) => (j === i ? { ...x, ...patch, end: patch.start && patch.start > x.end ? patch.start : (patch.end ?? x.end) } : x)))
+  const addSeg = () => {
+    const last = segs[segs.length - 1]
+    const d = last && isDateKey(last.end) ? shiftDate(last.end, 1) : today
+    setSegs([...segs, { start: d, end: d }])
+  }
+  // 併進來的旅程原本的小標題（自己沒填的那天才用）
+  const mergedTitles: Record<string, string> = Object.assign({}, ...merging.map(titlesByDate))
 
   const save = async () => {
-    if (!valid) return
+    if (!effective || error) return
     setSaving(true)
     try {
       const name = trip.name.trim() || '旅程'
-      await saveTrip({ ...trip, name, dayTitles: trip.dayTitles.slice(0, days.length), updatedAt: Date.now() })
-      toast(id ? '已儲存' : `已建立「${name}」`)
+      const finalSegs = tripSegments(effective)
+      const keep: Record<string, string> = {}
+      for (const d of days) {
+        const t = (titles[d] ?? mergedTitles[d] ?? '').trim()
+        if (t) keep[d] = t
+      }
+      await saveTrip({
+        ...effective,
+        name,
+        segments: finalSegs.length > 1 ? finalSegs : undefined,
+        start: finalSegs[0].start,
+        end: finalSegs[finalSegs.length - 1].end,
+        titles: keep,
+        dayTitles: [],
+        updatedAt: Date.now(),
+      })
+      for (const t of merging) await deleteTrip(t.id)
+      toast(merging.length ? `已併入 ${merging.length} 趟旅程` : id ? '已儲存' : `已建立「${name}」`)
       if (id) goBack(`trip/${trip.id}`)
       else navigate(`trip/${trip.id}`, true)
     } finally {
@@ -272,6 +329,7 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
 
   const covers = summary?.photoIds ?? []
   const shownCovers = moreCovers ? covers : covers.slice(0, 4)
+  const segCount = effective ? tripSegments(effective).length : 0
 
   return (
     <div className="page no-tabbar trip-edit">
@@ -280,7 +338,7 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
           取消
         </button>
         <h1>{id ? '編輯旅程' : '建立旅程'}</h1>
-        <button className="btn-text strong" onClick={save} disabled={!valid || saving}>
+        <button className="btn-text strong" onClick={save} disabled={!!error || saving}>
           儲存
         </button>
       </div>
@@ -291,42 +349,102 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
             <label htmlFor="trip-name">名稱</label>
             <input id="trip-name" className="text-input" value={trip.name} placeholder="例如：京都" onChange={(e) => set({ name: e.target.value })} />
           </div>
-          <div className="trip-dates">
-            <div className="field">
-              <label htmlFor="trip-start">開始</label>
-              <input
-                id="trip-start"
-                type="date"
-                className="text-input"
-                value={trip.start}
-                onChange={(e) => e.target.value && set({ start: e.target.value, end: e.target.value > trip.end ? e.target.value : trip.end })}
-              />
+
+          <span className="seg-title">日期{segs.length > 1 || merging.length ? '（好幾段）' : ''}</span>
+          {segs.map((x, i) => (
+            <div key={i} className="trip-seg-block">
+              {segs.length > 1 && (
+                <div className="trip-seg-head">
+                  <span>第 {i + 1} 段</span>
+                  <button className="seg-del" aria-label={`刪除第 ${i + 1} 段`} onClick={() => setSegs(segs.filter((_, j) => j !== i))}>
+                    <Icon name="close" size={18} />
+                  </button>
+                </div>
+              )}
+              <div className="trip-seg">
+                <input
+                  type="date"
+                  className="text-input"
+                  aria-label={`第 ${i + 1} 段開始`}
+                  value={x.start}
+                  onChange={(e) => e.target.value && setSeg(i, { start: e.target.value })}
+                />
+                <span className="muted">–</span>
+                <input
+                  type="date"
+                  className="text-input"
+                  aria-label={`第 ${i + 1} 段結束`}
+                  value={x.end}
+                  min={x.start}
+                  onChange={(e) => e.target.value && setSeg(i, { end: e.target.value })}
+                />
+              </div>
             </div>
-            <div className="field">
-              <label htmlFor="trip-end">結束</label>
-              <input id="trip-end" type="date" className="text-input" value={trip.end} min={trip.start} onChange={(e) => e.target.value && set({ end: e.target.value })} />
+          ))}
+          {merging.map((t) => (
+            <div key={t.id} className="trip-seg merged">
+              <span>
+                併入「{t.name}」{formatTripRange(t)} · {tripDaysText(t)}
+              </span>
+              <button className="seg-del" aria-label={`不要併入${t.name}`} onClick={() => setMergeIds(mergeIds.filter((m) => m !== t.id))}>
+                <Icon name="close" size={18} />
+              </button>
             </div>
+          ))}
+
+          <div className="seg-actions">
+            <button onClick={addSeg}>＋ 加一段日期</button>
+            {(others?.length ?? 0) > 0 && (
+              <button aria-expanded={picking} onClick={() => setPicking(!picking)}>
+                ＋ 併入其他旅程
+              </button>
+            )}
           </div>
-          {!valid ? (
+
+          {picking && others && (
+            <div className="merge-pick">
+              {others.map((t) => (
+                <label key={t.id} className="merge-row">
+                  <input
+                    type="checkbox"
+                    checked={mergeIds.includes(t.id)}
+                    onChange={(e) => setMergeIds(e.target.checked ? [...mergeIds, t.id] : mergeIds.filter((m) => m !== t.id))}
+                  />
+                  <span>
+                    <strong>{t.name}</strong>
+                    <small>
+                      {formatTripRange(t)} · {tripDaysText(t)}
+                    </small>
+                  </span>
+                </label>
+              ))}
+              <p className="hint" style={{ margin: 0 }}>
+                勾選的旅程儲存後會併進這一趟，原本那幾趟就不再單獨列出（紀錄、照片都不會被刪）
+              </p>
+            </div>
+          )}
+
+          {error ? (
             <p className="hint" style={{ color: 'var(--danger)' }}>
-              {trip.start > trip.end ? '結束日期要在開始日期之後' : `一趟旅程最多 ${MAX_DAYS} 天`}
+              {error}
             </p>
           ) : (
             summary && (
               <p className="hint">
-                {days.length} 天 · {summary.records} 筆紀錄、{summary.photos} 張照片、{summary.days.filter((d) => d.route.length > 1).length} 天有軌跡
+                共 {days.length} 天{segCount > 1 ? `（${segCount} 段）` : ''} · {summary.records} 筆紀錄、{summary.photos} 張照片、
+                {summary.days.filter((d) => d.route.length > 1).length} 天有軌跡
               </p>
             )
           )}
         </section>
 
-        {valid && (
+        {!error && days.length > 0 && (
           <section className="card stack">
             <h2 className="section-title" style={{ margin: 0 }}>
               每天的小標題 <span className="muted" style={{ fontWeight: 400 }}>（可不填）</span>
             </h2>
             {days.map((date, i) => (
-              <div key={date} className="trip-day-title">
+              <div key={date} className={`trip-day-title${i > 0 && shiftDate(days[i - 1], 1) !== date ? ' gap' : ''}`}>
                 <DayDot color={dayColor(i)} dashed={dayDashed(i)} />
                 <span className="lbl">
                   Day {i + 1}
@@ -337,14 +455,9 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
                 <input
                   className="text-input"
                   aria-label={`Day ${i + 1} 小標題`}
-                  value={trip.dayTitles[i] ?? ''}
+                  value={titles[date] ?? mergedTitles[date] ?? ''}
                   placeholder={i === 0 ? '例如：抵達、東山' : ''}
-                  onChange={(e) => {
-                    const next = [...trip.dayTitles]
-                    while (next.length < days.length) next.push('')
-                    next[i] = e.target.value
-                    set({ dayTitles: next })
-                  }}
+                  onChange={(e) => setTitles({ ...titles, [date]: e.target.value })}
                 />
               </div>
             ))}
@@ -430,7 +543,7 @@ function TripDetail({ id }: { id: string }) {
           </button>
           <div className="trip-pill">
             <strong>
-              {trip.name} · {tripLength(trip)} 天
+              {trip.name} · {tripDaysText(trip)}
             </strong>
             <span>{formatTripRange(trip)}</span>
           </div>
@@ -463,8 +576,11 @@ function TripDetail({ id }: { id: string }) {
         {summary.steps > 0 && <p className="hint">共走了 {formatNumber(summary.steps)} 步</p>}
 
         <div className="trip-days">
-          {summary.days.map((d) => (
-            <button key={d.date} onClick={() => navigate(`day/${d.date}`)} aria-label={`Day ${d.index + 1}${d.title ? ` ${d.title}` : ''}，支出 ${formatNumber(d.expense)}`}>
+          {summary.days.map((d, i) => (
+            <button
+              key={d.date}
+              className={i > 0 && shiftDate(summary.days[i - 1].date, 1) !== d.date ? 'gap' : undefined}
+              onClick={() => navigate(`day/${d.date}`)} aria-label={`Day ${d.index + 1}${d.title ? ` ${d.title}` : ''}，支出 ${formatNumber(d.expense)}`}>
               <DayDot color={d.color} dashed={d.dashed} />
               <span className="lbl">
                 Day {d.index + 1}
@@ -487,14 +603,20 @@ function TripDetail({ id }: { id: string }) {
   )
 }
 
-// ── 生成旅遊軌跡圖 ──
+// ── 生成旅遊軌跡圖（圖片／影片） ──
+
+type PosterMode = 'image' | 'video'
+const VIDEO_LENGTHS = [10, 15, 20]
 
 function PosterPage({ id }: { id: string }) {
   const data = useLiveQuery(async () => {
     const trip = await getTrip(id)
     return trip ? { trip, summary: await loadSummary(trip) } : null
   }, [id])
-  const [ratio, setRatio] = useState<PosterRatio>('4:5')
+  const [mode, setMode] = useState<PosterMode>('image')
+  const [imageRatio, setImageRatio] = useState<PosterRatio>('4:5')
+  const [videoRatio, setVideoRatio] = useState<PosterRatio>('9:16')
+  const [length, setLength] = useState(15)
   const [basemap, setBasemap] = useState<PosterBasemap>('tea')
   const [showMoney, setShowMoney] = useState(true)
   const [showNames, setShowNames] = useState(true)
@@ -502,41 +624,107 @@ function PosterPage({ id }: { id: string }) {
   const [blob, setBlob] = useState<Blob | null>(null)
   const [busy, setBusy] = useState(false)
   const url = useObjectUrl(blob)
+  // 影片
+  const [video, setVideo] = useState<VideoResult | null>(null)
+  const videoUrl = useObjectUrl(video?.blob)
+  const [recording, setRecording] = useState<number | null>(null)
+  const liveRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  useEffect(() => () => abortRef.current?.abort(), [])
 
-  useEffect(() => {
-    if (!data) return
-    let alive = true
-    setBusy(true)
+  const ratio = mode === 'image' ? imageRatio : videoRatio
+  const setRatio = mode === 'image' ? setImageRatio : setVideoRatio
+
+  const input = useMemo((): PosterInput | null => {
+    if (!data) return null
     const { trip, summary } = data
-    renderPoster({
+    return {
       name: trip.name,
       start: trip.start,
       end: trip.end,
-      days: summary.days.map((d) => ({ color: d.color, dashed: d.dashed, route: d.route, landmark: d.landmark })),
+      days: summary.days.map((d) => ({
+        color: d.color,
+        dashed: d.dashed,
+        route: d.route,
+        landmark: d.landmark,
+        label: `Day ${d.index + 1} · ${d.title || `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`}`,
+        km: d.km,
+        photos: d.photos,
+        expense: d.expense,
+        steps: d.steps ?? 0,
+      })),
       stats: { km: summary.km, places: summary.places, photos: summary.photos, expense: summary.expense, steps: summary.steps },
       ratio,
       basemap,
       showMoney,
       showNames,
       showCredit,
-    })
+    }
+  }, [data, ratio, basemap, showMoney, showNames, showCredit])
+
+  const fellBack = (used: PosterBasemap) => {
+    if (used === basemap) return
+    if (used !== 'none') setBasemap(used)
+    toast(used === 'osm' ? '奶茶淡色地圖載入失敗，先改用「淡色地圖」' : '地圖載入失敗，這次先只畫路線（有網路時再試一次）', 4000)
+  }
+
+  // 預覽（影片模式錄好之前也先顯示最後的定格畫面）
+  useEffect(() => {
+    if (!input) return
+    let alive = true
+    setBusy(true)
+    setVideo(null)
+    renderPoster(input)
       .then((r) => {
         if (!alive) return
         setBlob(r.blob)
-        if (r.used !== basemap) {
-          if (r.used !== 'none') setBasemap(r.used)
-          toast(r.used === 'osm' ? '奶茶淡色地圖載入失敗，先改用「淡色地圖」' : '地圖載入失敗，這次先只畫路線（有網路時再試一次）', 4000)
-        }
+        fellBack(r.used)
       })
       .catch((e) => alive && toast('產生圖片失敗：' + (e as Error).message, 4000))
       .finally(() => alive && setBusy(false))
     return () => {
       alive = false
     }
-  }, [data, ratio, basemap, showMoney, showNames, showCredit])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input])
 
-  if (data === null) return <div className="page no-tabbar"><p className="muted">找不到這趟旅程</p></div>
+  useEffect(() => setVideo(null), [length])
+
+  const record = async () => {
+    if (!input) return
+    const ac = new AbortController()
+    abortRef.current = ac
+    setVideo(null)
+    setRecording(0)
+    try {
+      const r = await recordVideo(input, length, {
+        signal: ac.signal,
+        onCanvas: (c) => {
+          c.className = 'live-canvas'
+          liveRef.current?.replaceChildren(c)
+        },
+        onProgress: (sec) => setRecording(sec),
+      })
+      setVideo(r)
+      fellBack(r.used)
+    } catch (e) {
+      if ((e as Error).name !== 'AbortError') toast('錄影失敗：' + (e as Error).message, 5000)
+    } finally {
+      liveRef.current?.replaceChildren()
+      setRecording(null)
+      abortRef.current = null
+    }
+  }
+
+  if (data === null)
+    return (
+      <div className="page no-tabbar">
+        <p className="muted">找不到這趟旅程</p>
+      </div>
+    )
   const name = data?.trip.name ?? ''
+  const canVideo = canRecordVideo()
+  const isRecording = recording != null
 
   return (
     <div className="page no-tabbar poster-page">
@@ -544,49 +732,73 @@ function PosterPage({ id }: { id: string }) {
         <button className="round-btn" aria-label="返回" onClick={() => goBack(`trip/${id}`)}>
           <Icon name="chevronLeft" size={20} />
         </button>
-        <h1>旅遊軌跡圖</h1>
+        <div className="segmented small two" role="group" aria-label="輸出成">
+          <button aria-pressed={mode === 'image'} disabled={isRecording} onClick={() => setMode('image')}>
+            圖片
+          </button>
+          <button aria-pressed={mode === 'video'} disabled={isRecording} onClick={() => setMode('video')}>
+            影片
+          </button>
+        </div>
         <span style={{ width: 44 }} />
       </div>
 
       <div className={`poster-preview r${ratio.replace(':', '')}`}>
-        {url && <img src={url} alt={`${name}旅遊軌跡圖預覽`} />}
-        {busy && <span className="spinner" />}
+        {mode === 'video' && videoUrl ? (
+          <video src={videoUrl} controls playsInline loop aria-label={`${name}旅遊軌跡影片`} />
+        ) : (
+          url && !isRecording && <img src={url} alt={`${name}旅遊軌跡圖預覽`} />
+        )}
+        <div ref={liveRef} className="live" />
+        {(busy || (isRecording && recording === 0)) && <span className="spinner" />}
       </div>
 
       <section className="card stack poster-options">
         <div className="kv">
           <span>比例</span>
           <div className="segmented small two" role="group" aria-label="比例">
-            <button aria-pressed={ratio === '4:5'} onClick={() => setRatio('4:5')}>
+            <button aria-pressed={ratio === '4:5'} disabled={isRecording} onClick={() => setRatio('4:5')}>
               4:5 貼文
             </button>
-            <button aria-pressed={ratio === '9:16'} onClick={() => setRatio('9:16')}>
+            <button aria-pressed={ratio === '9:16'} disabled={isRecording} onClick={() => setRatio('9:16')}>
               9:16 限動
             </button>
           </div>
         </div>
+        {mode === 'video' && (
+          <div className="kv">
+            <span>長度</span>
+            <div className="segmented small three" role="group" aria-label="長度">
+              {VIDEO_LENGTHS.map((n) => (
+                <button key={n} aria-pressed={length === n} disabled={isRecording} onClick={() => setLength(n)}>
+                  {n} 秒
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="kv">
           <span>底圖</span>
           <div className="segmented small two" role="group" aria-label="底圖">
-            <button aria-pressed={basemap === 'tea'} onClick={() => setBasemap('tea')}>
+            <button aria-pressed={basemap === 'tea'} disabled={isRecording} onClick={() => setBasemap('tea')}>
               奶茶淡色地圖
             </button>
-            <button aria-pressed={basemap === 'osm'} onClick={() => setBasemap('osm')}>
+            <button aria-pressed={basemap === 'osm'} disabled={isRecording} onClick={() => setBasemap('osm')}>
               淡色地圖
             </button>
           </div>
         </div>
         <label className="kv">
           <span>顯示花費</span>
-          <input type="checkbox" checked={showMoney} onChange={(e) => setShowMoney(e.target.checked)} />
+          <input type="checkbox" checked={showMoney} disabled={isRecording} onChange={(e) => setShowMoney(e.target.checked)} />
         </label>
         <label className="kv">
           <span>顯示地名</span>
-          <input type="checkbox" checked={showNames} onChange={(e) => setShowNames(e.target.checked)} />
+          <input type="checkbox" checked={showNames} disabled={isRecording} onChange={(e) => setShowNames(e.target.checked)} />
         </label>
         <label className="kv">
           <span>顯示地圖出處</span>
-          <input type="checkbox" checked={showCredit} onChange={(e) => setShowCredit(e.target.checked)} />
+          <input type="checkbox" checked={showCredit} disabled={isRecording} onChange={(e) => setShowCredit(e.target.checked)} />
         </label>
         {!showCredit && (
           <p className="hint" style={{ margin: 0 }}>
@@ -595,13 +807,56 @@ function PosterPage({ id }: { id: string }) {
         )}
       </section>
 
-      <button className="btn-primary" disabled={!blob || busy} onClick={() => blob && shareOrDownload(blob, `${name}-旅遊軌跡圖.png`)}>
-        <Icon name="share" size={20} />
-        分享／儲存到照片
-      </button>
-      <p className="hint" style={{ textAlign: 'center' }}>
-        分享選單裡選「儲存影像」就會存進相簿
-      </p>
+      {mode === 'image' ? (
+        <>
+          <button className="btn-primary" disabled={!blob || busy} onClick={() => blob && shareOrDownload(blob, `${name}-旅遊軌跡圖.png`)}>
+            <Icon name="share" size={20} />
+            分享／儲存到照片
+          </button>
+          <p className="hint" style={{ textAlign: 'center' }}>
+            分享選單裡選「儲存影像」就會存進相簿
+          </p>
+        </>
+      ) : !canVideo ? (
+        <p className="hint" style={{ textAlign: 'center', color: 'var(--danger)' }}>
+          這支手機的瀏覽器不支援錄影，只能輸出圖片
+        </p>
+      ) : isRecording ? (
+        <div className="rec-progress" role="status">
+          <div className="meter">
+            <span style={{ width: `${(recording / length) * 100}%` }} />
+          </div>
+          <span>
+            錄製中 {recording} / {length} 秒，請停在這個畫面
+          </span>
+          <button className="btn-text" onClick={() => abortRef.current?.abort()}>
+            取消
+          </button>
+        </div>
+      ) : video ? (
+        <>
+          <button className="btn-primary" onClick={() => shareOrDownload(video.blob, `${name}-旅遊軌跡影片.${video.ext}`)}>
+            <Icon name="share" size={20} />
+            分享／儲存到照片
+          </button>
+          <button className="btn-outline" onClick={record}>
+            重新錄製
+          </button>
+          <p className="hint" style={{ textAlign: 'center' }}>
+            分享選單裡選「儲存影片」就會存進相簿
+          </p>
+        </>
+      ) : (
+        <>
+          <button className="btn-primary" disabled={busy} onClick={record}>
+            <Icon name="camera" size={20} />
+            錄製影片（約 {length} 秒）
+          </button>
+          <p className="hint" style={{ textAlign: 'center' }}>
+            錄的時候要停在這個畫面，螢幕不要關
+          </p>
+        </>
+      )}
     </div>
   )
 }

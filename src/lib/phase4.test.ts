@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { calendarDays, categoryTotals, comparePeriod, eachDate, expenseSeries, firstWeekday, shiftMonth, sumExpenseUntil } from './stats'
-import { dayColor, dayDashed, formatTripRange, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
+import { dayColor, dayDashed, dayTitle, formatTripRange, mergeTrips, normalizeSegments, tripDates, tripDaysText, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
 import { formatBytes, yearsLeft, yearsText } from './usage'
+import { videoFrameAt, type PosterInput } from './poster'
 import type { Entry, TrackPoint, Trip } from './types'
 
 let seq = 0
@@ -152,6 +153,52 @@ describe('旅程', () => {
     expect([dayColor(20), dayDashed(20)]).toEqual(['#59413C', false])
   })
 
+  it('多段日期：整理、天數、小標題對日期', () => {
+    expect(
+      normalizeSegments([
+        { start: '2026-12-13', end: '2026-12-14' },
+        { start: '2026-12-01', end: '2026-12-03' },
+        { start: '2026-12-04', end: '2026-12-04' },
+        { start: '2026-12-09', end: '2026-12-08' },
+      ]),
+    ).toEqual([
+      { start: '2026-12-01', end: '2026-12-04' },
+      { start: '2026-12-13', end: '2026-12-14' },
+    ])
+    const t: Trip = { id: 'a', name: '環島', start: '2026-12-01', end: '2026-12-14', segments: [{ start: '2026-12-01', end: '2026-12-02' }, { start: '2026-12-13', end: '2026-12-14' }], dayTitles: [], titles: { '2026-12-13': '台東' }, coverPhotoId: null, createdAt: 1, updatedAt: 1 }
+    expect(tripDates(t)).toEqual(['2026-12-01', '2026-12-02', '2026-12-13', '2026-12-14'])
+    expect(tripDaysText(t)).toBe('4 天（2 段）')
+    expect(dayTitle(t, '2026-12-13', 2)).toBe('台東')
+    // 舊資料：沒有 segments、小標題照順序
+    const old: Trip = { id: 'b', name: 'x', start: '2026-10-03', end: '2026-10-04', dayTitles: ['抵達'], coverPhotoId: null, createdAt: 1, updatedAt: 1 }
+    expect(tripDaysText(old)).toBe('2 天')
+    expect(dayTitle(old, '2026-10-03', 0)).toBe('抵達')
+  })
+
+  it('併入其他旅程：日期段合在一起、小標題跟著日期走', () => {
+    const a: Trip = { id: 'a', name: '環島', start: '2026-12-01', end: '2026-12-03', dayTitles: ['出發'], coverPhotoId: null, createdAt: 1, updatedAt: 1 }
+    const b: Trip = { id: 'b', name: '台東', start: '2026-12-13', end: '2026-12-14', dayTitles: ['池上', ''], coverPhotoId: 'p9', createdAt: 1, updatedAt: 1 }
+    const m = mergeTrips(a, [b])
+    expect(m.segments).toEqual([
+      { start: '2026-12-01', end: '2026-12-03' },
+      { start: '2026-12-13', end: '2026-12-14' },
+    ])
+    expect([m.start, m.end, m.name, m.coverPhotoId]).toEqual(['2026-12-01', '2026-12-14', '環島', 'p9'])
+    expect(m.titles).toEqual({ '2026-12-01': '出發', '2026-12-13': '池上' })
+  })
+
+  it('多段旅程的統計不算中間沒出門的日子；已建立的段不再建議', () => {
+    const t: Trip = { id: 'a', name: 'x', start: '2026-11-01', end: '2026-11-10', segments: [{ start: '2026-11-01', end: '2026-11-01' }, { start: '2026-11-10', end: '2026-11-10' }], dayTitles: [], coverPhotoId: null, createdAt: 1, updatedAt: 1 }
+    const s = summarizeTrip(t, [entry({ date: '2026-11-01', amountTwd: 100 }), entry({ date: '2026-11-05', amountTwd: 999 }), entry({ date: '2026-11-10', amountTwd: 50 })], [], [])
+    expect(s.days.map((d) => d.date)).toEqual(['2026-11-01', '2026-11-10'])
+    expect(s.expense).toBe(150)
+    expect(s.records).toBe(2)
+    const away = [pt('2026-11-12', 10, tainan), pt('2026-11-13', 10, tainan), pt('2026-11-14', 20, chiayi)]
+    const seg = { start: '2026-11-01', end: '2026-11-20', segments: [{ start: '2026-11-01', end: '2026-11-02' }] }
+    expect(suggestTrips([], [...home, ...away], [seg], [], '2026-11-19')).toHaveLength(1)
+    expect(suggestTrips([], [...home, ...away], [{ ...seg, segments: [{ start: '2026-11-13', end: '2026-11-13' }] }], [], '2026-11-19')).toHaveLength(0)
+  })
+
   it('日期範圍的寫法', () => {
     expect(formatTripRange({ start: '2026-11-12', end: '2026-11-14' })).toBe('2026/11/12 – 11/14')
     expect(formatTripRange({ start: '2026-12-30', end: '2027-01-02' })).toBe('2026/12/30 – 2027/1/2')
@@ -169,5 +216,39 @@ describe('使用狀況', () => {
     expect(yearsText(0.5)).toBe('照現在的速度，大約 6 個月後會滿')
     expect(formatBytes(1536)).toBe('2 KB')
     expect(formatBytes(12.3 * MB)).toBe('12.3 MB')
+  })
+})
+
+describe('軌跡影片的時間軸', () => {
+  const day = (km: number, label: string) => ({ color: '#59413C', route: [], landmark: null, label, km, photos: 10, expense: 1000, steps: 0 })
+  const input = {
+    name: '環島', start: '2026-12-01', end: '2026-12-02', days: [day(100, 'Day 1 · 宜蘭'), day(50, 'Day 2 · 花蓮')],
+    stats: { km: 150, places: 8, photos: 20, expense: 2000, steps: 0 }, ratio: '9:16', basemap: 'none', showMoney: true, showNames: true, showCredit: true,
+  } as PosterInput
+  const p = { input, days: input.days.map((d) => ({ day: d, pts: [], cum: [0] })) }
+
+  it('開場：空的地圖、數字 0、標題淡入', () => {
+    const f = videoFrameAt(p, 0.4, 15)
+    expect(f.progress).toBe(0)
+    expect(f.titleAlpha).toBeCloseTo(0.5)
+    expect(f.numbers.km).toBe(0)
+    expect(f.chip).toBeNull()
+  })
+
+  it('中間：一天一天畫、數字往上加、顯示 Day 標籤', () => {
+    // 1.5～12 秒畫 2 天 → 第 9.375 秒畫到 1.5 天
+    const f = videoFrameAt(p, 9.375, 15)
+    expect(f.progress).toBeCloseTo(1.5)
+    expect(f.numbers.km).toBe(125)
+    expect(f.chip?.text).toBe('Day 2 · 花蓮')
+    expect(f.names).toBe(false)
+  })
+
+  it('結尾：畫完、數字是總數、地名出現', () => {
+    const f = videoFrameAt(p, 13, 15)
+    expect(f.progress).toBe(2)
+    expect(f.numbers).toEqual(input.stats)
+    expect(f.names).toBe(true)
+    expect(f.chip).toBeNull()
   })
 })

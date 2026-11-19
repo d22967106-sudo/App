@@ -22,6 +22,13 @@ export interface PosterDay {
   dashed?: boolean
   route: GeoPoint[]
   landmark: (GeoPoint & { name: string }) | null
+  /** 影片用：畫到這天時左上角顯示的字，例如「Day 2 · 花蓮」 */
+  label?: string
+  /** 影片用：這天的數字（畫到這天時往上加） */
+  km?: number
+  photos?: number
+  expense?: number
+  steps?: number
 }
 
 export interface PosterInput {
@@ -104,19 +111,36 @@ function fmt(n: number): string {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: n < 10 ? 1 : 0 })
 }
 
-/** 畫好的圖；used＝實際用的底圖（載入失敗會依序退到 osm、none） */
-export async function renderPoster(input: PosterInput): Promise<{ blob: Blob; used: PosterBasemap }> {
-  const order: PosterBasemap[] = input.basemap === 'tea' ? ['tea', 'osm', 'none'] : input.basemap === 'osm' ? ['osm', 'none'] : ['none']
+const basemapOrder = (b: PosterBasemap): PosterBasemap[] => (b === 'tea' ? ['tea', 'osm', 'none'] : b === 'osm' ? ['osm', 'none'] : ['none'])
+
+/** 依序試底圖（奶茶淡色 → 淡色地圖 → 只有路線），回傳準備好的畫布 */
+async function prepareWithFallback(input: PosterInput): Promise<Prepared> {
   let lastError: unknown
-  for (const basemap of order) {
+  for (const basemap of basemapOrder(input.basemap)) {
     try {
-      return { blob: await draw({ ...input, basemap }), used: basemap }
+      const p = await prepare({ ...input, basemap })
+      // 圖磚伺服器不允許跨網域讀取時，canvas 會被「汙染」不能輸出：先試一次
+      p.base.getContext('2d')!.getImageData(0, 0, 1, 1)
+      return p
     } catch (e) {
-      // 地圖載入失敗，或圖磚伺服器不允許跨網域讀取（canvas 被汙染不能輸出）→ 換下一種
       lastError = e
     }
   }
   throw lastError
+}
+
+/** 畫好的圖；used＝實際用的底圖（載入失敗會依序退到 osm、none） */
+export async function renderPoster(input: PosterInput): Promise<{ blob: Blob; used: PosterBasemap }> {
+  const p = await prepareWithFallback(input)
+  drawFrame(p, finalFrame(p))
+  const blob = await new Promise<Blob>((resolve, reject) => {
+    try {
+      p.canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('無法產生圖片'))), 'image/png')
+    } catch (e) {
+      reject(e)
+    }
+  })
+  return { blob, used: p.input.basemap }
 }
 
 /** 用 MapLibre 在畫面外畫一張奶茶淡色地圖（center、zoom 用 256 px 圖磚的算法） */
@@ -174,19 +198,41 @@ function unproject(x: number, y: number, z: number): GeoPoint {
   return { lat: (180 / Math.PI) * Math.atan(Math.sinh(n)), lng }
 }
 
-async function draw(input: PosterInput): Promise<Blob> {
+// ── 準備：底圖畫一次，路線位置先算好 ──
+
+interface ProjectedDay {
+  day: PosterDay
+  pts: [number, number][]
+  /** 每一點累積的長度（畫一部分路線用） */
+  cum: number[]
+}
+
+interface Prepared {
+  input: PosterInput
+  canvas: HTMLCanvasElement
+  ctx: CanvasRenderingContext2D
+  w: number
+  h: number
+  titleSize: number
+  titleBase: number
+  mx: number
+  my: number
+  mw: number
+  mh: number
+  /** 地圖區塊的底（底圖或空白），每一格都先貼上它 */
+  base: HTMLCanvasElement
+  days: ProjectedDay[]
+  start: [number, number] | null
+  project: (p: GeoPoint) => [number, number]
+}
+
+async function prepare(input: PosterInput): Promise<Prepared> {
   await document.fonts?.ready
   const { w, h } = posterSize(input.ratio)
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = BG
-  ctx.fillRect(0, 0, w, h)
-
-  // ── 標題與日期 ──
-  ctx.fillStyle = TEXT
-  ctx.textBaseline = 'alphabetic'
   let titleSize = 115
   ctx.font = `700 ${titleSize}px ${FONT}`
   while (ctx.measureText(input.name).width > w - PAD * 2 - 300 && titleSize > 56) {
@@ -194,24 +240,17 @@ async function draw(input: PosterInput): Promise<Blob> {
     ctx.font = `700 ${titleSize}px ${FONT}`
   }
   const titleBase = PAD + 100
-  ctx.fillText(input.name, PAD, titleBase)
-  ctx.textAlign = 'right'
-  ctx.fillStyle = TEXT_2
-  ctx.font = `400 25px ${FONT}`
-  ctx.fillText(formatRange(input.start, input.end), w - PAD, titleBase - 34)
-  ctx.fillText(`${input.days.length} DAY${input.days.length > 1 ? 'S' : ''}`, w - PAD, titleBase)
-  ctx.textAlign = 'left'
-
-  // ── 地圖 ──
   const mx = PAD
   const my = titleBase + 44
   const mw = w - PAD * 2
   const mh = h - my - 250 - PAD
-  ctx.save()
-  roundRect(ctx, mx, my, mw, mh, 28)
-  ctx.fillStyle = MAP_BG
-  ctx.fill()
-  ctx.clip()
+
+  const base = document.createElement('canvas')
+  base.width = Math.round(mw)
+  base.height = Math.round(mh)
+  const bctx = base.getContext('2d')!
+  bctx.fillStyle = MAP_BG
+  bctx.fillRect(0, 0, mw, mh)
 
   const all = input.days.flatMap((d) => d.route)
   let project: (p: GeoPoint) => [number, number] = () => [mx + mw / 2, my + mh / 2]
@@ -235,25 +274,20 @@ async function draw(input: PosterInput): Promise<Blob> {
 
     if (input.basemap === 'tea') {
       const img = await drawTeaMap(unproject(cx, cy, z), z, Math.round(mw), Math.round(mh))
-      ctx.drawImage(img, mx, my, mw, mh)
+      bctx.drawImage(img, 0, 0, mw, mh)
     } else if (input.basemap === 'osm') {
       const tz = Math.min(18, Math.ceil(z))
-      const k = 2 ** (z - tz)
-      const size = TILE * k
+      const size = TILE * 2 ** (z - tz)
       const left = cx - mw / 2
       const top = cy - mh / 2
-      const x0 = Math.floor(left / size)
-      const y0 = Math.floor(top / size)
-      const x1 = Math.floor((left + mw) / size)
-      const y1 = Math.floor((top + mh) / size)
       const jobs: Promise<void>[] = []
       let loaded = 0
-      for (let tx = x0; tx <= x1; tx++) {
-        for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = Math.floor(left / size); tx <= Math.floor((left + mw) / size); tx++) {
+        for (let ty = Math.floor(top / size); ty <= Math.floor((top + mh) / size); ty++) {
           jobs.push(
             loadTile(tz, tx, ty).then((img) => {
               if (!img) return
-              ctx.drawImage(img, tx * size + ox, ty * size + oy, size + 0.5, size + 0.5)
+              bctx.drawImage(img, tx * size - left, ty * size - top, size + 0.5, size + 0.5)
               loaded++
             }),
           )
@@ -262,50 +296,129 @@ async function draw(input: PosterInput): Promise<Blob> {
       await Promise.all(jobs)
       if (!loaded) throw new Error('地圖圖磚都載入失敗')
       // 奶茶色：先乘上米色，再蓋一層淡淡的底色
-      ctx.globalCompositeOperation = 'multiply'
-      ctx.fillStyle = '#F1E2CF'
-      ctx.fillRect(mx, my, mw, mh)
-      ctx.globalCompositeOperation = 'source-over'
-      ctx.fillStyle = 'rgba(251, 246, 239, 0.45)'
-      ctx.fillRect(mx, my, mw, mh)
+      bctx.globalCompositeOperation = 'multiply'
+      bctx.fillStyle = '#F1E2CF'
+      bctx.fillRect(0, 0, mw, mh)
+      bctx.globalCompositeOperation = 'source-over'
+      bctx.fillStyle = 'rgba(251, 246, 239, 0.45)'
+      bctx.fillRect(0, 0, mw, mh)
     }
+  }
+  if (input.basemap !== 'none' && input.showCredit) {
+    // 小而淡，但還讀得出來
+    bctx.font = `400 15px ${FONT}`
+    bctx.textAlign = 'right'
+    bctx.fillStyle = 'rgba(125, 100, 80, 0.75)'
+    bctx.fillText(input.basemap === 'tea' ? 'OpenFreeMap © OpenMapTiles © OpenStreetMap' : '© OpenStreetMap', mw - 14, mh - 12)
+  }
 
-    // 路線：先畫白邊再畫顏色
+  const days = input.days.map((day) => {
+    const pts = day.route.map(project)
+    const cum = [0]
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
+    return { day, pts, cum }
+  })
+  return { input, canvas, ctx, w, h, titleSize, titleBase, mx, my, mw, mh, base, days, start: all.length ? project(all[0]) : null, project }
+}
+
+// ── 畫一格 ──
+
+interface FrameState {
+  /** 畫到第幾天（可以有小數：2.5＝第 3 天畫一半） */
+  progress: number
+  /** 標題的透明度（開場淡入） */
+  titleAlpha: number
+  /** 地名（影片最後才出現） */
+  names: boolean
+  numbers: { km: number; places: number; photos: number; expense: number; steps: number }
+  /** 左上角的「Day 2 · 花蓮」 */
+  chip: { text: string; color: string } | null
+}
+
+function finalFrame(p: Prepared): FrameState {
+  return { progress: p.days.length, titleAlpha: 1, names: p.input.showNames, numbers: p.input.stats, chip: null }
+}
+
+/** 顏色太淺時字用深色 */
+function textOn(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  return 0.299 * r + 0.587 * g + 0.114 * b > 165 ? TEXT : '#FFFFFF'
+}
+
+function strokeRoute(ctx: CanvasRenderingContext2D, d: ProjectedDay, upto: number) {
+  // upto：畫到這條路線長度的幾分之幾
+  const total = d.cum[d.cum.length - 1]
+  const limit = total * upto
+  ctx.beginPath()
+  ctx.moveTo(d.pts[0][0], d.pts[0][1])
+  for (let i = 1; i < d.pts.length; i++) {
+    if (d.cum[i] <= limit) ctx.lineTo(d.pts[i][0], d.pts[i][1])
+    else {
+      const seg = d.cum[i] - d.cum[i - 1]
+      const k = seg ? (limit - d.cum[i - 1]) / seg : 0
+      ctx.lineTo(d.pts[i - 1][0] + (d.pts[i][0] - d.pts[i - 1][0]) * k, d.pts[i - 1][1] + (d.pts[i][1] - d.pts[i - 1][1]) * k)
+      break
+    }
+  }
+}
+
+function drawFrame(p: Prepared, f: FrameState) {
+  const { ctx, input, w, h, mx, my, mw, mh, titleBase } = p
+  ctx.save()
+  ctx.fillStyle = BG
+  ctx.fillRect(0, 0, w, h)
+
+  // ── 標題與日期 ──
+  ctx.globalAlpha = f.titleAlpha
+  ctx.fillStyle = TEXT
+  ctx.textBaseline = 'alphabetic'
+  ctx.font = `700 ${p.titleSize}px ${FONT}`
+  ctx.fillText(input.name, PAD, titleBase)
+  ctx.textAlign = 'right'
+  ctx.fillStyle = TEXT_2
+  ctx.font = `400 25px ${FONT}`
+  ctx.fillText(formatRange(input.start, input.end), w - PAD, titleBase - 34)
+  ctx.fillText(`${input.days.length} DAY${input.days.length > 1 ? 'S' : ''}`, w - PAD, titleBase)
+  ctx.textAlign = 'left'
+  ctx.globalAlpha = 1
+
+  // ── 地圖 ──
+  ctx.save()
+  roundRect(ctx, mx, my, mw, mh, 28)
+  ctx.clip()
+  ctx.drawImage(p.base, mx, my, mw, mh)
+
+  if (p.start) {
     ctx.lineJoin = 'round'
     ctx.lineCap = 'round'
     for (const pass of ['casing', 'line'] as const) {
-      for (const d of input.days) {
-        if (d.route.length < 2) continue
-        ctx.beginPath()
-        d.route.forEach((p, i) => {
-          const [x, y] = project(p)
-          if (i) ctx.lineTo(x, y)
-          else ctx.moveTo(x, y)
-        })
-        ctx.strokeStyle = pass === 'casing' ? (input.basemap !== 'none' ? '#FFFFFF' : BG) : d.color
+      p.days.forEach((d, i) => {
+        const upto = Math.max(0, Math.min(1, f.progress - i))
+        if (upto <= 0 || d.pts.length < 2) return
+        strokeRoute(ctx, d, upto)
+        ctx.strokeStyle = pass === 'casing' ? (input.basemap !== 'none' ? '#FFFFFF' : BG) : d.day.color
         ctx.lineWidth = pass === 'casing' ? 14 : 7
-        ctx.setLineDash(pass === 'line' && d.dashed ? [16, 14] : [])
+        ctx.setLineDash(pass === 'line' && d.day.dashed ? [16, 14] : [])
         ctx.stroke()
         ctx.setLineDash([])
-      }
+      })
     }
 
     // 起點
-    const [sx, sy] = project(all[0])
     ctx.beginPath()
-    ctx.arc(sx, sy, 13, 0, Math.PI * 2)
+    ctx.arc(p.start[0], p.start[1], 13, 0, Math.PI * 2)
     ctx.fillStyle = TEXT
     ctx.fill()
 
     // 地名
-    if (input.showNames) {
+    if (f.names) {
       ctx.font = `400 24px ${FONT}`
-      const placed: [number, number][] = [[sx, sy]]
+      const placed: [number, number][] = [p.start]
       const names = new Set<string>()
-      for (const d of input.days) {
+      for (const { day: d } of p.days) {
         const lm = d.landmark
         if (!lm || names.has(lm.name)) continue
-        const [x, y] = project(lm)
+        const [x, y] = p.project(lm)
         if (placed.some(([px, py]) => Math.hypot(px - x, py - y) < 70)) continue
         placed.push([x, y])
         names.add(lm.name)
@@ -328,19 +441,22 @@ async function draw(input: PosterInput): Promise<Blob> {
         ctx.textAlign = 'left'
       }
     }
+
+    // 影片：左上角「Day 2 · 花蓮」
+    if (f.chip) {
+      ctx.font = `700 30px ${FONT}`
+      const tw = ctx.measureText(f.chip.text).width
+      ctx.fillStyle = f.chip.color
+      roundRect(ctx, mx + 24, my + 24, tw + 44, 54, 27)
+      ctx.fill()
+      ctx.fillStyle = textOn(f.chip.color)
+      ctx.fillText(f.chip.text, mx + 46, my + 62)
+    }
   } else {
     ctx.fillStyle = TEXT_2
     ctx.font = `400 28px ${FONT}`
     ctx.textAlign = 'center'
     ctx.fillText('這段期間沒有軌跡', mx + mw / 2, my + mh / 2)
-    ctx.textAlign = 'left'
-  }
-  if (input.basemap !== 'none' && input.showCredit) {
-    // 小而淡，但還讀得出來
-    ctx.font = `400 15px ${FONT}`
-    ctx.textAlign = 'right'
-    ctx.fillStyle = 'rgba(125, 100, 80, 0.75)'
-    ctx.fillText(input.basemap === 'tea' ? 'OpenFreeMap © OpenMapTiles © OpenStreetMap' : '© OpenStreetMap', mx + mw - 14, my + mh - 12)
     ctx.textAlign = 'left'
   }
   ctx.restore()
@@ -351,7 +467,7 @@ async function draw(input: PosterInput): Promise<Blob> {
   const shown = input.days.slice(0, 7)
   const slot = mw / Math.max(shown.length, 1)
   shown.forEach((d, i) => {
-    const x = mx + slot * i + (shown.length === 1 ? 0 : 0)
+    const x = mx + slot * i
     if (d.dashed) {
       ctx.strokeStyle = d.color
       ctx.lineWidth = 7
@@ -375,11 +491,12 @@ async function draw(input: PosterInput): Promise<Blob> {
   const dy = ly + 40
   ctx.fillStyle = LINE
   ctx.fillRect(mx, dy, mw, 2)
+  const n = f.numbers
   const items: [string, string][] = [
-    [fmt(input.stats.km), '公里'],
-    [fmt(input.stats.places), '個地點'],
-    [fmt(input.stats.photos), '張照片'],
-    input.showMoney ? [fmt(Math.round(input.stats.expense)), '新台幣'] : [fmt(input.stats.steps), '步'],
+    [fmt(n.km), '公里'],
+    [fmt(Math.round(n.places)), '個地點'],
+    [fmt(Math.round(n.photos)), '張照片'],
+    input.showMoney ? [fmt(Math.round(n.expense)), '新台幣'] : [fmt(Math.round(n.steps)), '步'],
   ]
   const col = mw / 4
   items.forEach(([num, label], i) => {
@@ -391,12 +508,114 @@ async function draw(input: PosterInput): Promise<Blob> {
     ctx.font = `400 22px ${FONT}`
     ctx.fillText(label, x, dy + 124)
   })
+  ctx.restore()
+}
 
-  return new Promise((resolve, reject) => {
-    try {
-      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('無法產生圖片'))), 'image/png')
-    } catch (e) {
-      reject(e)
+// ── 影片 ──
+
+/** 開場、結尾定格的秒數 */
+const INTRO = 1.5
+const OUTRO = 3
+
+/** 影片第 t 秒的畫面 */
+export function videoFrameAt(p: Pick<Prepared, 'input' | 'days'>, t: number, duration: number): FrameState {
+  const { input } = p
+  const n = p.days.length
+  const drawEnd = duration - OUTRO
+  const progress = n === 0 ? 0 : Math.max(0, Math.min(n, ((t - INTRO) / (drawEnd - INTRO)) * n))
+  const done = t >= drawEnd
+  // 數字跟著畫到的天數往上加
+  const whole = Math.floor(progress)
+  const frac = progress - whole
+  const sum = (key: 'km' | 'photos' | 'expense' | 'steps') => {
+    let v = 0
+    p.days.forEach((d, i) => {
+      const x = d.day[key] ?? 0
+      if (i < whole) v += x
+      else if (i === whole) v += x * frac
+    })
+    return v
+  }
+  const numbers = done
+    ? input.stats
+    : {
+        km: Math.round(sum('km')),
+        places: n ? (input.stats.places * progress) / n : 0,
+        photos: sum('photos'),
+        expense: sum('expense'),
+        steps: sum('steps'),
+      }
+  const current = p.days[Math.min(n - 1, whole)]?.day
+  return {
+    progress,
+    titleAlpha: Math.min(1, t / 0.8),
+    names: done && input.showNames,
+    numbers,
+    chip: !done && progress > 0 && current?.label ? { text: current.label, color: current.color } : null,
+  }
+}
+
+export interface VideoResult {
+  blob: Blob
+  /** 副檔名 mp4 或 webm */
+  ext: string
+  used: PosterBasemap
+}
+
+function pickMime(): string | null {
+  if (typeof MediaRecorder === 'undefined') return null
+  for (const m of ['video/mp4;codecs=avc1.640028', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm']) {
+    if (MediaRecorder.isTypeSupported?.(m)) return m
+  }
+  return null
+}
+
+/** 這支手機能不能錄影 */
+export function canRecordVideo(): boolean {
+  return !!pickMime() && typeof HTMLCanvasElement.prototype.captureStream === 'function'
+}
+
+/**
+ * 錄影片：準備好畫布後交給 onCanvas 放到畫面上（邊錄邊看；錄的時候畫布要在畫面上），
+ * 用 requestAnimationFrame 一格一格畫，MediaRecorder 錄下 canvas 的畫面。
+ */
+export async function recordVideo(
+  input: PosterInput,
+  duration: number,
+  hooks: { onCanvas: (c: HTMLCanvasElement) => void; onProgress: (sec: number) => void; signal?: AbortSignal },
+): Promise<VideoResult> {
+  const mime = pickMime()
+  if (!mime || typeof HTMLCanvasElement.prototype.captureStream !== 'function') throw new Error('這支手機的瀏覽器不支援錄影')
+  const p = await prepareWithFallback(input)
+  drawFrame(p, videoFrameAt(p, 0, duration))
+  hooks.onCanvas(p.canvas)
+  const stream = p.canvas.captureStream(30)
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 })
+  const chunks: Blob[] = []
+  recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+  const stopped = new Promise<void>((resolve) => (recorder.onstop = () => resolve()))
+  recorder.start(500)
+  await new Promise<void>((resolve, reject) => {
+    const t0 = performance.now()
+    let last = -1
+    const tick = () => {
+      if (hooks.signal?.aborted) return reject(new DOMException('已取消', 'AbortError'))
+      const t = (performance.now() - t0) / 1000
+      drawFrame(p, videoFrameAt(p, Math.min(t, duration), duration))
+      const sec = Math.floor(t)
+      if (sec !== last) {
+        last = sec
+        hooks.onProgress(Math.min(sec, duration))
+      }
+      if (t >= duration) resolve()
+      else requestAnimationFrame(tick)
     }
+    requestAnimationFrame(tick)
+  }).finally(() => {
+    if (recorder.state !== 'inactive') recorder.stop()
+    stream.getTracks().forEach((tr) => tr.stop())
   })
+  await stopped
+  const type = mime.split(';')[0]
+  return { blob: new Blob(chunks, { type }), ext: type === 'video/mp4' ? 'mp4' : 'webm', used: p.input.basemap }
 }

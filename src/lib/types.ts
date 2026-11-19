@@ -82,15 +82,25 @@ export interface TrackPoint {
   label?: string
 }
 
-/** 旅程：一段日期範圍，每天一種顏色 */
+/** 旅程的一段日期（含頭尾） */
+export interface TripSegment {
+  start: string
+  end: string
+}
+
+/** 旅程：一段或好幾段日期，每天一種顏色 */
 export interface Trip {
   id: string
   name: string
-  /** 開始、結束日期 YYYY-MM-DD（含頭尾） */
+  /** 最早、最晚的日期 YYYY-MM-DD（含頭尾；有 segments 時＝第一段的開始、最後一段的結束） */
   start: string
   end: string
-  /** 每天的小標題（第 i 個＝第 i+1 天），可空 */
+  /** 好幾段不連續的日期（例如分三次環島）；沒有就是 start～end 一整段 */
+  segments?: TripSegment[]
+  /** 舊版：每天的小標題（第 i 個＝第 i+1 天）。新版改存在 titles */
   dayTitles: string[]
+  /** 每天的小標題，key 是日期（日期增減時不會對錯天） */
+  titles?: Record<string, string>
   /** 封面照片；沒選就用軌跡縮圖 */
   coverPhotoId: string | null
   createdAt: number
