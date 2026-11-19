@@ -1,4 +1,4 @@
--- 記帳日記 第 3 階段：自動化（背景定位、捷徑、Scriptable 小工具）
+-- 摳摳手帳 第 3 階段：自動化（背景定位、捷徑、Scriptable 小工具）
 -- 用法：App「設定 → 自動化」按「複製設定 SQL」→ Supabase 後台 → SQL Editor → New query → 貼上 → Run。
 -- 要先執行過 schema.sql。可以重複執行（不會刪掉資料）。
 --

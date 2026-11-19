@@ -18,7 +18,7 @@
 
 ## 目前狀態
 
-**第 4 階段（日曆、統計、旅程、軌跡圖、使用狀況）程式完成（2026-11-19），在工作分支 `claude/eloquent-faraday-9t5s59`，等使用者同意合併到預設分支發布，再到使用狀況頁執行 phase4.sql、在 iPhone 實測。細節見下方「第 4 階段」。**
+**第 4 階段（日曆、統計、旅程、軌跡圖、使用狀況）程式完成（2026-11-19），在工作分支 `claude/eloquent-faraday-9t5s59`，已合併到預設分支發布，等使用者到使用狀況頁執行 phase4.sql、在 iPhone 實測。細節見下方「第 4 階段」。**
 
 **第 3 階段實測完成（2026-11-19）：背景定位存進雲端、地圖路線與「抵達／離開」、步數、小工具都正常；耗電可接受（見下方）。下一步：使用者決定是否進第 4 階段。**
 
@@ -205,7 +205,7 @@
 - [x] 旅遊軌跡圖（`src/lib/poster.ts`，`#/trip/<id>/poster`）：canvas 畫 1080×1350（4:5）或 1080×1920（9:16）PNG；底圖「只有路線」或「淡色地圖」（OSM 圖磚＋米色 multiply＋淡底色，右下標 © OpenStreetMap；圖磚讓 canvas 不能輸出時自動改回只有路線並提示）；顯示花費（關掉改顯示步數）、顯示地名（每天離起點最遠、有地名的紀錄，同名或太近的不重複標）。按「分享／儲存到照片」叫出 iOS 分享選單。
 - [x] 使用狀況（`src/pages/UsagePage.tsx`，`#/usage`）：雲端資料庫大小（`usage_stats()`＝`pg_database_size`，含固定開銷）＋各表筆數與大小、照片空間（Worker `GET /usage` 列 R2 `<user>/` 加總，最多 10 萬個檔）、照現在的速度還能用幾年（資料滿 14 天才估）、手機上的空間與筆數。流量不顯示（要管理金鑰）。
 - [x] 測試：`src/lib/phase4.test.ts` 10 項、`worker/usage.test.js` 2 項，全部 102 項；`phase4.sql` 在本機 PostgreSQL 16 模擬 Supabase 跑過（可重複執行、別人看不到、anon 不能呼叫 usage_stats）；Playwright 模擬 iPhone 13 用假資料看過日曆、統計（月／年／展開分類）、設定、使用狀況、旅程列表／建議／新增／編輯／地圖、軌跡圖預覽與輸出的 PNG，沒有錯誤。
-- [ ] 發布：要合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從那裡自動部署）。**使用者還沒回答「以後做完可以直接合併發布嗎」**。
+- [x] 發布：已合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從那裡自動部署）。使用者 2026-11-19 同意：**以後功能做完、測試通過就可以直接合併到預設分支發布**（fast-forward）。
 - [ ] 使用者要做：發布後到「統計 → 齒輪 → 使用狀況」按「複製設定 SQL」，在 Supabase SQL Editor 執行（建立 trips 表與 usage_stats）。
 - [ ] 使用者 iPhone 實測：日曆、統計、旅程建議、旅程地圖、軌跡圖（特別是「淡色地圖」能不能出圖、分享選單能不能存進相簿）、使用狀況的數字。
 - 沒辦法在開發環境確認的：OSM 圖磚實機能不能畫進 canvas（開發環境連不到）、iOS 分享選單存圖、Supabase 上 `pg_database_size` 的實際數字、Cloudflare 免費方案列 R2 的速度。

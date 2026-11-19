@@ -53,7 +53,7 @@
 
 ```
 iPhone 自動記錄                雲端（免費）             你看到的地方
-健康 App → 捷徑 ───────────→ Supabase 資料庫 ←──→ 記帳日記 App（PWA）
+健康 App → 捷徑 ───────────→ Supabase 資料庫 ←──→ 摳摳手帳 App（PWA）
 Overland/OwnTracks ────────→ （紀錄、軌跡、步數）  ──→ Scriptable 小工具
                               Cloudflare R2 ←────── App 上傳照片
 借用的免費服務：GitHub Pages（放 App）、OpenStreetMap（地圖、地名、店名搜尋）、匯率 API

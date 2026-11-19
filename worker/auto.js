@@ -1,5 +1,5 @@
 /**
- * 記帳日記：自動化接收端（掛在照片伺服器同一個 Worker 上）
+ * 摳摳手帳：自動化接收端（掛在照片伺服器同一個 Worker 上）
  *
  * 背景定位 App、捷徑、Scriptable 小工具都用「自動化金鑰」（App 設定頁產生）：
  *   Authorization: Bearer <金鑰>    （Overland、捷徑、Scriptable）

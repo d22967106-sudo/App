@@ -1,4 +1,4 @@
--- 記帳日記：Supabase 資料表與權限（RLS）
+-- 摳摳手帳：Supabase 資料表與權限（RLS）
 -- 用法：Supabase 後台 → SQL Editor → New query → 整份貼上 → Run。
 -- 可以重複執行（不會刪掉資料）。
 -- 第 3 階段的自動化（步數表、自動化金鑰、auto_* 函式）在 automation.sql，要另外執行。

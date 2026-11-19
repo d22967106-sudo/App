@@ -1,5 +1,5 @@
 /**
- * 記帳日記：照片伺服器（Cloudflare Worker + R2）
+ * 摳摳手帳：照片伺服器（Cloudflare Worker + R2）
  *
  * 用法見 docs/setup-cloud.md。需要設定：
  *   R2 bucket 綁定      PHOTOS
