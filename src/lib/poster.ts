@@ -1,11 +1,21 @@
+import { Map as MlMap, setWorkerUrl } from 'maplibre-gl'
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+import { MAP_STYLES, type VectorStyle } from './mapStyles'
 import type { GeoPoint } from './types'
+import type { StyleSpec } from './vectorStyle'
+
+setWorkerUrl(maplibreWorkerUrl)
 
 /**
  * 旅遊軌跡圖：用 canvas 畫出一張圖片（1080 寬，4:5 或 9:16）。
- * 版面照預覽圖「6 旅遊軌跡圖（簡潔版）」；底圖可選「只有路線」或「淡色地圖」（OSM 圖磚＋奶茶色蓋一層）。
+ * 版面照預覽圖「6 旅遊軌跡圖（簡潔版）」；底圖：
+ *   tea＝奶茶淡色地圖（跟地圖首頁預設一樣的 OpenFreeMap 向量地圖，用 MapLibre 在畫面外畫好再貼上）
+ *   osm＝淡色地圖（OSM 圖磚＋奶茶色蓋一層）
+ *   none＝只有路線（前兩種都失敗時才會用到）
  */
 
 export type PosterRatio = '4:5' | '9:16'
+export type PosterBasemap = 'tea' | 'osm' | 'none'
 
 export interface PosterDay {
   color: string
@@ -20,7 +30,7 @@ export interface PosterInput {
   days: PosterDay[]
   stats: { km: number; places: number; photos: number; expense: number; steps: number }
   ratio: PosterRatio
-  basemap: boolean
+  basemap: PosterBasemap
   showMoney: boolean
   showNames: boolean
 }
@@ -91,17 +101,74 @@ function fmt(n: number): string {
   return n.toLocaleString('zh-TW', { maximumFractionDigits: n < 10 ? 1 : 0 })
 }
 
-/** 畫好的圖；basemapFailed＝底圖載入失敗（改成只有路線） */
-export async function renderPoster(input: PosterInput): Promise<{ blob: Blob; basemapFailed: boolean }> {
-  try {
-    const blob = await draw(input)
-    return { blob, basemapFailed: false }
-  } catch (e) {
-    if (!input.basemap) throw e
-    // 圖磚伺服器不允許跨網域讀取時，canvas 會被「汙染」不能輸出 → 改成只有路線
-    const blob = await draw({ ...input, basemap: false })
-    return { blob, basemapFailed: true }
+/** 畫好的圖；used＝實際用的底圖（載入失敗會依序退到 osm、none） */
+export async function renderPoster(input: PosterInput): Promise<{ blob: Blob; used: PosterBasemap }> {
+  const order: PosterBasemap[] = input.basemap === 'tea' ? ['tea', 'osm', 'none'] : input.basemap === 'osm' ? ['osm', 'none'] : ['none']
+  let lastError: unknown
+  for (const basemap of order) {
+    try {
+      return { blob: await draw({ ...input, basemap }), used: basemap }
+    } catch (e) {
+      // 地圖載入失敗，或圖磚伺服器不允許跨網域讀取（canvas 被汙染不能輸出）→ 換下一種
+      lastError = e
+    }
   }
+  throw lastError
+}
+
+/** 用 MapLibre 在畫面外畫一張奶茶淡色地圖（center、zoom 用 256 px 圖磚的算法） */
+async function drawTeaMap(center: GeoPoint, z: number, w: number, h: number): Promise<HTMLCanvasElement> {
+  const st = MAP_STYLES.find((m) => m.id === 'warm') as VectorStyle
+  const res = await fetch(st.styleUrl)
+  if (!res.ok) throw new Error(`style ${res.status}`)
+  const spec = st.transform((await res.json()) as StyleSpec)
+  const el = document.createElement('div')
+  el.style.cssText = `position:fixed;left:0;top:0;width:${w}px;height:${h}px;opacity:0;pointer-events:none;z-index:-1`
+  document.body.appendChild(el)
+  const map = new MlMap({
+    container: el,
+    style: spec as never,
+    center: [center.lng, center.lat],
+    // MapLibre 的圖磚是 512 px，所以縮放等級少 1
+    zoom: z - 1,
+    interactive: false,
+    attributionControl: false,
+    pixelRatio: 1,
+    fadeDuration: 0,
+    canvasContextAttributes: { preserveDrawingBuffer: true },
+    localIdeographFontFamily: "'PingFang TC', 'Noto Sans TC', sans-serif",
+  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('地圖載入逾時')), 20000)
+      map.once('idle', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+      map.on('error', (e) => {
+        // 個別圖磚失敗不算，樣式本身失敗才放棄
+        if (!(e as { tile?: unknown }).tile && !map.loaded()) {
+          clearTimeout(timer)
+          reject(e.error ?? new Error('地圖載入失敗'))
+        }
+      })
+    })
+    const out = document.createElement('canvas')
+    out.width = w
+    out.height = h
+    out.getContext('2d')!.drawImage(map.getCanvas(), 0, 0, w, h)
+    return out
+  } finally {
+    map.remove()
+    el.remove()
+  }
+}
+
+function unproject(x: number, y: number, z: number): GeoPoint {
+  const scale = TILE * 2 ** z
+  const lng = (x / scale) * 360 - 180
+  const n = Math.PI - (2 * Math.PI * y) / scale
+  return { lat: (180 / Math.PI) * Math.atan(Math.sinh(n)), lng }
 }
 
 async function draw(input: PosterInput): Promise<Blob> {
@@ -163,7 +230,10 @@ async function draw(input: PosterInput): Promise<Blob> {
       return [x + ox, y + oy]
     }
 
-    if (input.basemap) {
+    if (input.basemap === 'tea') {
+      const img = await drawTeaMap(unproject(cx, cy, z), z, Math.round(mw), Math.round(mh))
+      ctx.drawImage(img, mx, my, mw, mh)
+    } else if (input.basemap === 'osm') {
       const tz = Math.min(18, Math.ceil(z))
       const k = 2 ** (z - tz)
       const size = TILE * k
@@ -174,16 +244,20 @@ async function draw(input: PosterInput): Promise<Blob> {
       const x1 = Math.floor((left + mw) / size)
       const y1 = Math.floor((top + mh) / size)
       const jobs: Promise<void>[] = []
+      let loaded = 0
       for (let tx = x0; tx <= x1; tx++) {
         for (let ty = y0; ty <= y1; ty++) {
           jobs.push(
             loadTile(tz, tx, ty).then((img) => {
-              if (img) ctx.drawImage(img, tx * size + ox, ty * size + oy, size + 0.5, size + 0.5)
+              if (!img) return
+              ctx.drawImage(img, tx * size + ox, ty * size + oy, size + 0.5, size + 0.5)
+              loaded++
             }),
           )
         }
       }
       await Promise.all(jobs)
+      if (!loaded) throw new Error('地圖圖磚都載入失敗')
       // 奶茶色：先乘上米色，再蓋一層淡淡的底色
       ctx.globalCompositeOperation = 'multiply'
       ctx.fillStyle = '#F1E2CF'
@@ -205,7 +279,7 @@ async function draw(input: PosterInput): Promise<Blob> {
           if (i) ctx.lineTo(x, y)
           else ctx.moveTo(x, y)
         })
-        ctx.strokeStyle = pass === 'casing' ? (input.basemap ? '#FFFFFF' : BG) : d.color
+        ctx.strokeStyle = pass === 'casing' ? (input.basemap !== 'none' ? '#FFFFFF' : BG) : d.color
         ctx.lineWidth = pass === 'casing' ? 14 : 7
         ctx.stroke()
       }
@@ -241,7 +315,7 @@ async function draw(input: PosterInput): Promise<Blob> {
         const right = x + 18 + tw < mx + mw - 12
         ctx.textAlign = right ? 'left' : 'right'
         ctx.lineWidth = 6
-        ctx.strokeStyle = input.basemap ? 'rgba(255,255,255,0.85)' : MAP_BG
+        ctx.strokeStyle = input.basemap !== 'none' ? 'rgba(255,255,255,0.85)' : MAP_BG
         const lx = right ? x + 18 : x - 18
         ctx.strokeText(lm.name, lx, y - 10)
         ctx.fillStyle = TEXT_BODY
@@ -256,11 +330,11 @@ async function draw(input: PosterInput): Promise<Blob> {
     ctx.fillText('這段期間沒有軌跡', mx + mw / 2, my + mh / 2)
     ctx.textAlign = 'left'
   }
-  if (input.basemap) {
+  if (input.basemap !== 'none') {
     ctx.font = `400 16px ${FONT}`
     ctx.textAlign = 'right'
     ctx.fillStyle = TEXT_2
-    ctx.fillText('© OpenStreetMap', mx + mw - 14, my + mh - 12)
+    ctx.fillText(input.basemap === 'tea' ? '© OpenFreeMap © OpenStreetMap' : '© OpenStreetMap', mx + mw - 14, my + mh - 12)
     ctx.textAlign = 'left'
   }
   ctx.restore()

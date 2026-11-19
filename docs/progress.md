@@ -202,7 +202,7 @@
   - 自動建議：家＝最常過夜的地方（每天最早／最晚的位置，約 2 km 一格，至少 3 次）；某天任何一點離家 > 50 km 就算外地；連續 ≥ 2 天、已經回家（最後位置不在外地、結束日 < 今天）、沒跟現有旅程重疊、沒按過「不用」（meta `trip.dismissed`）才建議；名稱取紀錄地名裡最常出現的縣市（去掉市／縣）。
   - 建立／編輯 `#/trip/new?s=&e=&n=`、`#/trip/<id>/edit`：名稱、日期（最多 60 天）、每天小標題、封面照片、刪除（不刪紀錄）。
   - 旅程地圖 `#/trip/<id>`：每天一種顏色的路線（`MapView` 多了 `routes`）、總花費／公里／照片／紀錄、外幣合計、總步數、每天花費長條（點了到那天的回顧頁）。
-- [x] 旅遊軌跡圖（`src/lib/poster.ts`，`#/trip/<id>/poster`）：canvas 畫 1080×1350（4:5）或 1080×1920（9:16）PNG；底圖「只有路線」或「淡色地圖」（OSM 圖磚＋米色 multiply＋淡底色，右下標 © OpenStreetMap；圖磚讓 canvas 不能輸出時自動改回只有路線並提示）；顯示花費（關掉改顯示步數）、顯示地名（每天離起點最遠、有地名的紀錄，同名或太近的不重複標）。按「分享／儲存到照片」叫出 iOS 分享選單。
+- [x] 旅遊軌跡圖（`src/lib/poster.ts`，`#/trip/<id>/poster`）：canvas 畫 1080×1350（4:5）或 1080×1920（9:16）PNG；底圖（使用者 2026-11-19 要求把「只有路線」換掉）：**奶茶淡色地圖（預設）**＝跟地圖首頁一樣的 OpenFreeMap 向量地圖，用 MapLibre 在畫面外（opacity 0 的 div、preserveDrawingBuffer、pixelRatio 1、zoom 減 1 因為 512 px 圖磚）畫好、等 idle 再貼進 canvas，右下標 © OpenFreeMap © OpenStreetMap；**淡色地圖**＝OSM 圖磚＋米色 multiply＋淡底色。失敗時依序退到淡色地圖 → 只有路線並提示（圖磚全部載入失敗也算失敗）。開發環境用假的樣式（geojson 方塊）確認過貼上的位置和路線對得上；顯示花費（關掉改顯示步數）、顯示地名（每天離起點最遠、有地名的紀錄，同名或太近的不重複標）。按「分享／儲存到照片」叫出 iOS 分享選單。
 - [x] 使用狀況（`src/pages/UsagePage.tsx`，`#/usage`）：雲端資料庫大小（`usage_stats()`＝`pg_database_size`，含固定開銷）＋各表筆數與大小、照片空間（Worker `GET /usage` 列 R2 `<user>/` 加總，最多 10 萬個檔）、照現在的速度還能用幾年（資料滿 14 天才估）、手機上的空間與筆數。流量不顯示（要管理金鑰）。
 - [x] 測試：`src/lib/phase4.test.ts` 10 項、`worker/usage.test.js` 2 項，全部 102 項；`phase4.sql` 在本機 PostgreSQL 16 模擬 Supabase 跑過（可重複執行、別人看不到、anon 不能呼叫 usage_stats）；Playwright 模擬 iPhone 13 用假資料看過日曆、統計（月／年／展開分類）、設定、使用狀況、旅程列表／建議／新增／編輯／地圖、軌跡圖預覽與輸出的 PNG，沒有錯誤。
 - [x] 發布：已合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從那裡自動部署）。使用者 2026-11-19 同意：**以後功能做完、測試通過就可以直接合併到預設分支發布**（fast-forward）。

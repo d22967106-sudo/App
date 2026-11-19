@@ -21,7 +21,7 @@ import {
 import { goBack, navigate, useLiveQuery, useObjectUrl } from '../lib/hooks'
 import { getSyncStatus, missingTables, onSyncStatus } from '../lib/sync'
 import { isDateKey, toDateKey } from '../lib/ledger'
-import { renderPoster, type PosterRatio } from '../lib/poster'
+import { renderPoster, type PosterBasemap, type PosterRatio } from '../lib/poster'
 import { eachDate } from '../lib/stats'
 import {
   dayColor,
@@ -489,7 +489,7 @@ function PosterPage({ id }: { id: string }) {
     return trip ? { trip, summary: await loadSummary(trip) } : null
   }, [id])
   const [ratio, setRatio] = useState<PosterRatio>('4:5')
-  const [basemap, setBasemap] = useState(false)
+  const [basemap, setBasemap] = useState<PosterBasemap>('tea')
   const [showMoney, setShowMoney] = useState(true)
   const [showNames, setShowNames] = useState(true)
   const [blob, setBlob] = useState<Blob | null>(null)
@@ -515,9 +515,9 @@ function PosterPage({ id }: { id: string }) {
       .then((r) => {
         if (!alive) return
         setBlob(r.blob)
-        if (r.basemapFailed) {
-          setBasemap(false)
-          toast('地圖底圖載入失敗，先用「只有路線」', 4000)
+        if (r.used !== basemap) {
+          if (r.used !== 'none') setBasemap(r.used)
+          toast(r.used === 'osm' ? '奶茶淡色地圖載入失敗，先改用「淡色地圖」' : '地圖載入失敗，這次先只畫路線（有網路時再試一次）', 4000)
         }
       })
       .catch((e) => alive && toast('產生圖片失敗：' + (e as Error).message, 4000))
@@ -560,10 +560,10 @@ function PosterPage({ id }: { id: string }) {
         <div className="kv">
           <span>底圖</span>
           <div className="segmented small two" role="group" aria-label="底圖">
-            <button aria-pressed={!basemap} onClick={() => setBasemap(false)}>
-              只有路線
+            <button aria-pressed={basemap === 'tea'} onClick={() => setBasemap('tea')}>
+              奶茶淡色地圖
             </button>
-            <button aria-pressed={basemap} onClick={() => setBasemap(true)}>
+            <button aria-pressed={basemap === 'osm'} onClick={() => setBasemap('osm')}>
               淡色地圖
             </button>
           </div>
