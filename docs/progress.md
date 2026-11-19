@@ -1,6 +1,6 @@
 # 進度
 
-最後更新：2026-11-18（第 3 階段程式完成，等使用者在 iPhone 設定與實測）
+最後更新：2026-11-19（第 3 階段使用者實測完成）
 
 ## ⚠️ 給接手者的教訓（使用者特別交代，務必銘記）
 
@@ -18,7 +18,9 @@
 
 ## 目前狀態
 
-**第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；C2 步數已完成並測試成功；23:55 自動化已教；D Scriptable 預覽成功（等使用者放到主畫面、重新複製新版腳本）；C3 記下位置可選；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
+**第 3 階段實測完成（2026-11-19）：背景定位存進雲端、地圖路線與「抵達／離開」、步數、小工具都正常；耗電可接受（見下方）。下一步：使用者決定是否進第 4 階段。**
+
+第 3 階段（自動化）程式已完成（2026-11-18），工作分支 `claude/funny-carson-raa0uu`，經使用者同意已 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`（App 與照片伺服器都從預設分支自動部署）。下一步：使用者照 `docs/setup-automation.md` 一步一步設定並實測（A1、A2 已完成；B Overland 已設定：一鍵設定成功、Send Now 後 QUEUED 變 0。設定：Standard、100m、Min Distance 10m、Min Time 30s、送出間隔 5 分鐘、Show Background Location Indicator Yes。C1 快速記一筆已完成並測試成功（曾出現「網路連線中斷」，原因是標頭多了兩行空白，刪掉就好）；C2 步數已完成並測試成功；23:55 自動化已教；D Scriptable 預覽成功（等使用者放到主畫面、重新複製新版腳本）；C3 記下位置可選；隔天看 Overland 耗電，太耗再開 Pause Updates＋Resume with Geofence 200m）。**
 
 ### 第 3 階段的做法
 
@@ -46,6 +48,11 @@
   - 金額沒填按儲存＝0 元（輸入框提示本來就是 0）。
   - Scriptable 腳本第一行有版本（`版本 2026-11-18.2`），App 設定頁顯示目前版本（`SCRIPT_VERSION` 從範本讀出），改腳本時要改版本號，使用者才知道要重新貼上。
   - 0 元也能記帳：App 的金額可以填 0（`parseAmount` 允許 0，列表顯示「0」不加正負號）；捷徑金額填 0 記成 0 元的帳，留空才當日記。
+- **實測結果（2026-11-19）**：
+  - 背景定位：雲端有收到，路線與「抵達／離開」正常（11/18 沒存進去的問題已不再出現）。
+  - 步數：使用者改成**按小工具時**順便送今天＋昨天的步數（小工具 → Scriptable → 捷徑「打開記帳日記」，使用者在這個捷徑裡加了記步數；那時一定解鎖），實測正常。
+  - 小工具「今天在／路線」切換、點小工具打開 App 正常。
+  - 耗電：到 21:56 全天用 53%（iOS 說與平常相似）；Overland 背景 21 時 18 分，占 7%（約全部電量的 4%）。使用者體感待機 12 小時約掉 30%。不需要開 Pause Updates／Geofence，維持現在的設定。
 - **與規劃不同的地方**（技術限制）：iOS 捷徑「特定時間」自動化沒有每小時，「每小時補一個點」改成可選的幾個固定時間；已記在 plan.md。
 - **測試**：`worker/auto.test.js` 15 項（格式解析、金鑰、重送、步數只增不減、小工具資料）；`supabase/automation.sql` 在本機 PostgreSQL 16 模擬 Supabase 的 auth／角色跑過（金鑰驗證、anon 不能直接讀表、不能呼叫 auto_user、不支援的表會拒絕）；停留偵測 4 項、同步 2 項；全部單元測試 88 項。Playwright 模擬 iPhone 13 看過地圖、回顧頁、設定頁；Scriptable 腳本用假的 Scriptable API 跑過中型與「一年前」。
 - **沒辦法在開發環境確認的**：Overland 目前的設定畫面（官方文件網站連不到，只看了 GitHub 上的 README）、捷徑動作的繁中名稱、Scriptable 實機外觀、健康資料在鎖定時能不能讀。
@@ -176,7 +183,7 @@
 - [x] 時間軸「抵達／離開」、步數顯示
 - [x] 部署：已推到預設分支（App 由 GitHub Actions、照片伺服器由 Cloudflare 自動部署；照片伺服器是否部署成功要使用者按「測試連線」確認）
 - [x] 使用者執行 automation.sql、產生金鑰、設定 Overland／捷徑（記一筆、記步數）／Scriptable（2026-11-18）
-- [ ] 使用者在 iPhone 上實測一整天：出門的路線與「抵達／離開」、23:55 自動記步數、Overland 耗電、小工具「今天在／路線」切換
+- [x] 使用者在 iPhone 上實測一整天：出門的路線與「抵達／離開」、步數（改成按小工具時送）、Overland 耗電、小工具「今天在／路線」切換（2026-11-19）
 - [ ] （可選）C3 記下位置捷徑；App 名稱改「摳摳手帳」（使用者主畫面已改名，App 內文字要不要改還沒回覆）
 
 ## 第 4 階段：進階
