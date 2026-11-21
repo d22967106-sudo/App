@@ -1,7 +1,7 @@
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent } from 'react'
 import { Icon } from '../components/Icon'
-import { MapView, type MapMarker, type MapRoute } from '../components/MapView'
+import { MapView, type MapDot, type MapMarker, type MapRoute } from '../components/MapView'
 import { MapStyleSheet } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { getCategory } from '../lib/categories'
@@ -15,7 +15,7 @@ import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toD
 import { useStayNames } from '../lib/stayNames'
 import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
 import { getLegModes, getRouteSettings, onRouteSettingsChange, setLegMode, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
-import { isAuto } from '../lib/stays'
+import { isAuto, MAX_ACCURACY } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
 const TAIPEI: GeoPoint = { lat: 25.0418, lng: 121.5435 }
@@ -260,6 +260,20 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     return out
   }, [entries, fullTrack, thumbs, route, stays, stayNames, lastAuto, legs])
 
+  // 除錯：背景定位的原始點（設定頁「路線」打開）
+  const dots = useMemo<MapDot[] | undefined>(() => {
+    if (!routeSettings.rawPoints || !rawTrack) return undefined
+    return rawTrack
+      .filter(isAuto)
+      .sort((a, b) => a.time - b.time)
+      .map((p) => {
+        const unused = p.accuracy != null && p.accuracy > MAX_ACCURACY
+        const t = new Date(p.time)
+        const sec = String(t.getSeconds()).padStart(2, '0')
+        return { lat: p.lat, lng: p.lng, unused, label: `${formatTime(p.time)}:${sec} · 精確度 ${p.accuracy != null ? `±${p.accuracy} m` : '不明'}${unused ? '（太差，不採用）' : ''}` }
+      })
+  }, [routeSettings.rawPoints, rawTrack])
+
   // ── 播放當天行程 ──
   const [playhead, setPlayhead] = useState<GeoPoint | null>(null)
   const playRaf = useRef<number | null>(null)
@@ -376,6 +390,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         onRouteClick={(id) => pickLeg(id === legSel ? null : id)}
         focus={pickedLeg ? legLine(pickedLeg) : null}
         markers={markers}
+        dots={dots}
         selectedId={selected}
         onSelect={(id) => {
           setLegSel(null)

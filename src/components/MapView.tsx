@@ -23,6 +23,13 @@ export interface MapRoute {
   noCasing?: boolean
 }
 
+/** 除錯用：背景定位的原始點（小圓點，點了顯示時間與精確度） */
+export interface MapDot extends GeoPoint {
+  label: string
+  /** App 不採用的點（精確度太差）畫成灰色 */
+  unused?: boolean
+}
+
 export interface MapMarker {
   id: string
   lat: number
@@ -42,6 +49,8 @@ interface Props {
   /** 有給就把畫面對準這些點（例如選了一段路線） */
   focus?: GeoPoint[] | null
   markers: MapMarker[]
+  /** 原始定位點（不影響畫面範圍） */
+  dots?: MapDot[]
   selectedId?: string | null
   onSelect?: (id: string) => void
   /** 播放中的位置 */
@@ -106,6 +115,7 @@ export function MapView({
   onRouteClick,
   focus,
   markers,
+  dots,
   selectedId,
   onSelect,
   playhead,
@@ -160,7 +170,7 @@ export function MapView({
 
   // 畫路線與標記
   const routeKey = JSON.stringify([route.map((p) => [p.lat, p.lng]), routes?.map((r) => [r.id, r.color, r.dashed, r.weight, r.opacity, r.noCasing, r.points.map((p) => [p.lat, p.lng])])])
-  const markerKey = JSON.stringify(markers)
+  const markerKey = JSON.stringify([markers, dots])
   const focusKey = focus ? JSON.stringify(focus.map((p) => [p.lat, p.lng])) : ''
   useEffect(() => {
     const map = mapRef.current
@@ -197,6 +207,18 @@ export function MapView({
           })
           .addTo(layer)
       }
+    }
+    for (const d of dots ?? []) {
+      L.circleMarker([d.lat, d.lng], {
+        radius: 4,
+        color: '#FFFFFF',
+        weight: 1.5,
+        fillColor: d.unused ? '#9A9A9A' : '#2B6CB0',
+        fillOpacity: 0.9,
+        interactive: !isStatic,
+      })
+        .bindPopup(esc(d.label))
+        .addTo(layer)
     }
     // 照片標記放最上面
     const sorted = [...markers].sort((a, b) => Number(!!a.thumbUrl) - Number(!!b.thumbUrl))

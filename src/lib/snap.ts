@@ -153,9 +153,11 @@ export interface RouteSettings {
   snap: boolean
   /** 預設交通方式（自動判斷不是走路、也不是火車時用這個） */
   mode: TravelMode
+  /** 地圖上顯示背景定位的原始點（除錯：分辨是沒收到還是被過濾掉） */
+  rawPoints: boolean
 }
 
-export const DEFAULT_ROUTE_SETTINGS: RouteSettings = { snap: true, mode: 'scooter' }
+export const DEFAULT_ROUTE_SETTINGS: RouteSettings = { snap: true, mode: 'scooter', rawPoints: false }
 
 export async function getRouteSettings(): Promise<RouteSettings> {
   return { ...DEFAULT_ROUTE_SETTINGS, ...((await getMeta<Partial<RouteSettings>>('route.settings')) ?? {}) }

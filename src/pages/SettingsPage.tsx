@@ -211,6 +211,15 @@ function RouteSection() {
           ))}
         </select>
       </label>
+      <label className="kv" style={{ alignItems: 'center' }}>
+        <span>
+          顯示原始定位點
+          <span className="muted" style={{ display: 'block', fontSize: 12 }}>
+            除錯用：地圖上用藍色小點標出 Overland 送來的每一個點（灰色＝精確度太差沒採用），點一下看時間與精確度。路線少一段時，有點＝App 沒畫出來，沒點＝Overland 沒記到
+          </span>
+        </span>
+        <input type="checkbox" checked={st.rawPoints} onChange={(e) => saveRouteSettings({ rawPoints: e.target.checked })} style={{ width: 22, height: 22 }} />
+      </label>
       <p className="hint" style={{ margin: 0 }}>
         很慢的路段自動當走路、很快的（火車、高鐵）不貼齊；每一段也可以在地圖上點開後自己改。比對用 OpenStreetMap 社群的免費服務（FOSSGIS 的 Valhalla），每段只送一次、結果存在手機上；連不上時先畫直線。
       </p>

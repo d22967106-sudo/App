@@ -222,6 +222,9 @@
   - **貼齊道路**（`snap.ts`）：GET `https://valhalla1.openstreetmap.de/trace_route?json=`（`encoded_polyline` 6 位小數、`shape_match: map_snap`、costing：機車 motor_scooter／汽車 auto／走路 pedestrian／公車 bus），每次間隔 1.1 秒、一次最多 250 點（太長切開）；結果存 meta `snap.<mode>.<點的雜湊>`，同樣的點不再送；失敗記下來 1 小時內不重試、畫原本的直線；貼齊後比原本長 2.5 倍以上＝比對錯了，不用。地圖左上角小標籤：已貼齊道路（機車）／貼齊道路中…／部分路段沒有貼齊。
   - 測試：`src/lib/legs.test.ts` 7 項（切段、飄移不算、猜交通方式、延續點、polyline 編解碼、Valhalla 假伺服器＋快取＋失敗），全部 116 項；Playwright 用假的 Valhalla 回應看過切段、選一段、改交通方式、延續點、設定頁。
   - 2026-11-19 使用者 iPhone 實測：**貼齊道路成功，路線「準確多了」**（Valhalla 從 iPhone 連得到）。
+- [ ] 2026-11-21 使用者回報兩個問題（調查中）：
+  1. **短距離走路沒畫進路線**：截圖是 11/21 09:57，面板「背景定位 07:59」、0.2 km。App 端可能吃掉短距離的地方：停留半徑 150 m（家附近 150 m 內走來走去整段都算在「停留」裡，沒有移動段）、一段少於 200 m 不算（`MIN_LEG_M`）、移動距離小於精確度的點不畫（`cleanPath`，Overland 精確度設 100m 時走路的點常是 ±30～65 m）。Overland 端可能根本沒記到。為了分辨，加了設定頁「路線」→「顯示原始定位點」（`RouteSettings.rawPoints`，`MapView` 的 `dots`：藍點＝收到的點、灰點＝精確度 > 200 m 不採用，點一下看時間與精確度）。**等使用者打開看那段走路有沒有藍點**，再決定改 App 的過濾（有點）或改 Overland 設定（沒點）。
+  2. **Overland 21 小時耗電 14%**（11/19 量到的是背景 21 時 18 分占 7%）。Overland 官網（overland.p3k.app）在開發環境連不到，改看 GitHub 原始碼（aaronpk/Overland-iOS，1.4 版，2026-11-12）：「Standard」模式＋不暫停＝整天開著定位，連在家睡覺也是，這是主要耗電來源；Min Distance／Min Time／Discard points while stationary 只是丟掉點、不會關定位，不省電。新版有 **Auto-Stop Radius／Auto-Stop After**（在半徑內待滿設定時間就關掉定位，靠「重大位置變更」或 Resume with Geofence 的圍欄離開時再開），這是省電的正解，但代價是離開時要走出圍欄（最小 100 m，iOS 圍欄偵測常常更晚）才恢復，**短距離走路會更容易漏掉**，和問題 1 互相衝突，要使用者選。App Store 上的版本有沒有 Auto-Stop 還沒確認（請使用者看設定頁有沒有這兩項）。
 - 掃發票先不做；停留提醒、軌跡精簡不做（見上）。
 
 ## 已知問題
