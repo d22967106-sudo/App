@@ -46,6 +46,9 @@ export interface Leg {
   km: number
   avgKmh: number
   maxKmh: number
+  /** 同一段移動中途換交通方式（停車走路、走路去取車）切開時，切點的名稱 */
+  fromLabel?: string
+  toLabel?: string
 }
 
 function pathKm(pts: GeoPoint[]): number {
@@ -181,20 +184,82 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
     const distinct = distinctStays(g.from, g.to)
     if (km * 1000 < MIN_LEG_M && !distinct) continue
     if (km * 1000 < SHORT_LEG_M && !reallyMoved(raw, g.from, g.to, maxSpeed(seg))) continue
-    const hours = (seg[seg.length - 1].time - seg[0].time) / 3600000
-    legs.push({
-      id: `leg-${seg[0].time}`,
-      start: seg[0].time,
-      end: seg[seg.length - 1].time,
-      points: seg,
-      from: g.from,
-      to: g.to,
-      km: Math.round(km * 10) / 10,
-      avgKmh: hours > 0 ? km / hours : 0,
-      maxKmh: maxSpeed(seg),
+    const parts = splitByMode(seg)
+    parts.forEach((part, k) => {
+      const pk = pathKm(part.points)
+      const hours = (part.points[part.points.length - 1].time - part.points[0].time) / 3600000
+      legs.push({
+        id: `leg-${part.points[0].time}`,
+        start: part.points[0].time,
+        end: part.points[part.points.length - 1].time,
+        points: part.points,
+        from: k === 0 ? g.from : null,
+        to: k === parts.length - 1 ? g.to : null,
+        km: Math.round(pk * 10) / 10,
+        avgKmh: hours > 0 ? pk / hours : 0,
+        maxKmh: maxSpeed(part.points),
+        ...(k > 0 ? { fromLabel: parts[k - 1].walk ? '取車處' : '停車處' } : {}),
+        ...(k < parts.length - 1 ? { toLabel: part.walk ? '取車處' : '停車處' } : {}),
+      })
     })
   }
   return legs
+}
+
+/** 走路速度（km/h）以下 */
+const SPLIT_WALK_KMH = 7
+/** 騎車速度（km/h）以上 */
+const SPLIT_RIDE_KMH = 15
+/** 兩點相隔超過這麼久（秒）不拿來判斷（中間可能停著等） */
+const SPLIT_MAX_GAP_S = 90
+
+/**
+ * 同一段移動中途換交通方式（例如騎車找停車位、停好走路回家）就切開。
+ * 走路的部分要：連續至少 3 個間隔是走路速度、合計 ≥ 90 秒、≥ 60 m，而且這段其他地方有騎車速度。
+ * 只看一兩個點不夠：騎車在巷子裡轉彎時兩點之間的直線速度會很慢（2026-11-21 23:25 家附近）。
+ */
+export function splitByMode(seg: TrackPoint[]): { points: TrackPoint[]; walk: boolean }[] {
+  const n = seg.length
+  if (n < 5) return [{ points: seg, walk: false }]
+  // 每個間隔：S＝走路速度、F＝騎車速度、N＝停著或相隔太久（不影響）、M＝中間
+  const kind: ('S' | 'F' | 'N' | 'M')[] = []
+  const dist: number[] = []
+  for (let i = 1; i < n; i++) {
+    const d = distanceM(seg[i - 1], seg[i])
+    const dt = (seg[i].time - seg[i - 1].time) / 1000
+    dist.push(d)
+    const v = dt > 0 ? (d / dt) * 3.6 : 0
+    if (dt > SPLIT_MAX_GAP_S || d < 3) kind.push('N')
+    else if (v < SPLIT_WALK_KMH) kind.push('S')
+    else if (v >= SPLIT_RIDE_KMH) kind.push('F')
+    else kind.push('M')
+  }
+  if (!kind.includes('F')) return [{ points: seg, walk: false }]
+  // 找走路的區間（只由 S、N 組成）
+  const walks: [number, number][] = []
+  for (let i = 0; i < kind.length; i++) {
+    if (kind[i] !== 'S') continue
+    let j = i
+    while (j + 1 < kind.length && (kind[j + 1] === 'S' || kind[j + 1] === 'N')) j++
+    while (j > i && kind[j] === 'N') j--
+    let count = 0
+    let m = 0
+    for (let k = i; k <= j; k++) if (kind[k] === 'S') (count++, (m += dist[k]))
+    const secs = (seg[j + 1].time - seg[i].time) / 1000
+    if (count >= 3 && secs >= 90 && m >= 60) walks.push([i, j + 1])
+    i = j
+  }
+  if (!walks.length) return [{ points: seg, walk: false }]
+  // 依切點分成騎車／走路幾段（切點的點兩段共用，線接得起來）
+  const out: { points: TrackPoint[]; walk: boolean }[] = []
+  let at = 0
+  for (const [a, b] of walks) {
+    if (a > at) out.push({ points: seg.slice(at, a + 1), walk: false })
+    out.push({ points: seg.slice(a, b + 1), walk: true })
+    at = b
+  }
+  if (at < n - 1) out.push({ points: seg.slice(at), walk: false })
+  return out.filter((p) => p.points.length >= 2)
 }
 
 /** 最快也不超過這個時速＝走路（點少的短段平均時速會被誤差灌高，例如兩點 34 秒 80 m 算成 8.6 km/h） */

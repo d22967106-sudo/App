@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, dropWobble, guessMode, withCarry } from './legs'
-import { decodePolyline, encodePolyline, snapLeg, thin, tidySnapped } from './snap'
+import { decodePolyline, encodePolyline, snapDrawn, snapLeg, thin, tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
@@ -294,4 +294,25 @@ describe('2026-11-22 使用者手繪路線對照', () => {
     const out = tidySnapped(snapped, raw)
     expect(out.some((p) => (p.lng - home.lng) / 0.0000098 < -45)).toBe(true)
   })
+})
+
+describe('手繪修改路線', () => {
+  const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+  it('畫的線送去貼齊道路（太近的點去掉）；失敗就用畫的線', async () => {
+    const drawn = Array.from({ length: 101 }, (_, i) => P(i * 3, 12)) // 300 m、每 3 m 一點、畫在路旁 12 m
+    const road = [P(0), P(300)]
+    let url = ''
+    const ok = (async (u: string) => {
+      url = decodeURIComponent(u)
+      return new Response(JSON.stringify({ trip: { legs: [{ shape: encodePolyline(road) }] } }))
+    }) as unknown as typeof fetch
+    expect(await snapDrawn(drawn, 'walk', ok)).toEqual(road.map((p) => ({ lat: Math.round(p.lat * 1e6) / 1e6, lng: Math.round(p.lng * 1e6) / 1e6 })))
+    expect(url).toContain('"costing":"pedestrian"')
+    const sent = decodePolyline(JSON.parse(url.split('json=')[1]).encoded_polyline)
+    expect(sent.length).toBeLessThan(45) // 3 m 一點 → 8 m 以上才留
+    const bad = (async () => new Response('{}', { status: 500 })) as unknown as typeof fetch
+    const fallback = await snapDrawn(drawn, 'scooter', bad)
+    expect(fallback[0]).toEqual(drawn[0])
+    expect(fallback.at(-1)).toEqual(drawn.at(-1))
+  }, 10000)
 })

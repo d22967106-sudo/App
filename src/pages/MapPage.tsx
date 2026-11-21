@@ -9,12 +9,12 @@ import { formatTwd } from '../lib/currency'
 import { buildRoute, buildTimeline, dayStats, dayStays, type RoutePoint, type TimelineItem } from '../lib/day'
 import { getEntriesByDate, getMeta, getPhoto, getSteps, getTrackBefore, getTrackByDate, onPhotoThumb, setMeta } from '../lib/db'
 import { entrySubtitle, entryTitle, shortAmount } from '../lib/display'
-import { getCurrentPosition } from '../lib/geo'
+import { distanceM, getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
 import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
-import { getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegMode, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
+import { getLegEdits, getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto, MAX_ACCURACY } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
@@ -40,11 +40,14 @@ function formatShort(ms: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${formatTime(ms)}`
 }
 
-/** 路線設定與手動選的交通方式（設定頁改了會跟著變） */
-function useRouteSettings(): { settings: RouteSettings; legModes: Record<string, TravelMode> } {
-  const [st, setSt] = useState<{ settings: RouteSettings; legModes: Record<string, TravelMode> }>({ settings: DEFAULT_ROUTE_SETTINGS, legModes: {} })
+type LegEdits = Record<string, [number, number][]>
+
+/** 路線設定、手動選的交通方式、手繪修改的路線（設定頁或卡片改了會跟著變） */
+function useRouteSettings(): { settings: RouteSettings; legModes: Record<string, TravelMode>; legEdits: LegEdits } {
+  const [st, setSt] = useState<{ settings: RouteSettings; legModes: Record<string, TravelMode>; legEdits: LegEdits }>({ settings: DEFAULT_ROUTE_SETTINGS, legModes: {}, legEdits: {} })
   useEffect(() => {
-    const load = () => Promise.all([getRouteSettings(), getLegModes()]).then(([settings, legModes]) => setSt({ settings, legModes }))
+    const load = () =>
+      Promise.all([getRouteSettings(), getLegModes(), getLegEdits()]).then(([settings, legModes, legEdits]) => setSt({ settings, legModes, legEdits }))
     load()
     return onRouteSettingsChange(load)
   }, [])
@@ -134,7 +137,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
 
   // ── 一段一段的移動、交通方式、貼齊道路 ──
   const legs = useMemo(() => computeLegs(fullTrack ?? [], stays), [fullTrack, stays])
-  const { settings: routeSettings, legModes } = useRouteSettings()
+  const { settings: routeSettings, legModes, legEdits } = useRouteSettings()
   const modeOf = useCallback(
     (l: Leg): { mode: TravelMode; auto: boolean } => {
       const manual = legModes[`${date}/${l.id}`]
@@ -165,11 +168,27 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snapKey])
+  /** 手繪修改過的路線（沒有就 null） */
+  const editOf = (l: Leg): GeoPoint[] | null => legEdits[`${date}/${l.id}`]?.map(([lat, lng]) => ({ lat, lng })) ?? null
   const legLine = (l: Leg): GeoPoint[] => {
+    const ed = editOf(l)
+    if (ed) return ed
     const sp = snapped[l.id]
     return sp && sp !== 'pending' ? sp : l.points
   }
+  /** 這段的公里數（手繪修改過就用畫的線算） */
+  const legKm = (l: Leg): number => {
+    const ed = editOf(l)
+    if (!ed) return l.km
+    let m = 0
+    for (let i = 1; i < ed.length; i++) m += distanceM(ed[i - 1], ed[i])
+    return Math.round(m / 100) / 10
+  }
+  // 手繪修改：畫線中、貼齊道路中
+  const [drawing, setDrawing] = useState(false)
+  const [drawBusy, setDrawBusy] = useState(false)
   const [legSel, setLegSel] = useState<string | null>(null)
+  useEffect(() => setDrawing(false), [legSel, date])
   useEffect(() => setLegSel(null), [date])
   const pickedLeg = legs.find((l) => l.id === legSel) ?? null
   const snapStatus = useMemo(() => {
@@ -192,7 +211,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           : { id: l.id, points: legLine(l), color: LEG_OFF, weight: 4, opacity: 0.75, noCasing: true },
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [legs, snapped, legSel])
+  }, [legs, snapped, legSel, legEdits])
 
   const items = useMemo<Item[]>(() => {
     if (!legs.length) return timeline
@@ -206,8 +225,8 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
 
   const placeName = (stay: Leg['from']) => (stay ? (stayNames[stay.id] ?? '…') : null)
   const legTitle = (l: Leg, i: number) => {
-    const from = placeName(l.from) ?? (i === 0 ? '起點' : '…')
-    const to = placeName(l.to) ?? (date === today && i === legs.length - 1 ? '目前位置' : '終點')
+    const from = placeName(l.from) ?? l.fromLabel ?? (i === 0 ? '起點' : '…')
+    const to = placeName(l.to) ?? l.toLabel ?? (date === today && i === legs.length - 1 ? '目前位置' : '終點')
     return `${from} → ${to}`
   }
 
@@ -433,6 +452,17 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         route={route}
         routes={mapRoutes}
         onRouteClick={(id) => pickLeg(id === legSel ? null : id)}
+        drawMode={drawing && !!pickedLeg}
+        onDrawEnd={async (pts) => {
+          if (!pickedLeg) return
+          setDrawing(false)
+          setDrawBusy(true)
+          const mode = modeOf(pickedLeg).mode
+          const line = routeSettings.snap ? await snapDrawn(pts, mode) : pts
+          await setLegEdit(date, pickedLeg.id, line)
+          setDrawBusy(false)
+          toast('已用你畫的路線取代這段')
+        }}
         focus={pickedLeg ? legLine(pickedLeg) : null}
         markers={markers}
         dots={dots}
@@ -491,6 +521,12 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           onNext={() => pickLeg(legs[legIndex + 1].id)}
           onClose={() => pickLeg(null)}
           onMode={(m) => setLegMode(date, pickedLeg.id, m)}
+          km={legKm(pickedLeg)}
+          edited={!!editOf(pickedLeg)}
+          drawing={drawing}
+          drawBusy={drawBusy}
+          onDraw={() => setDrawing((d) => !d)}
+          onRestore={() => setLegEdit(date, pickedLeg.id, null)}
         />
       ) : (
         snapStatus && <div className="snap-chip">{snapStatus}</div>
@@ -564,7 +600,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
                 <span className="main">
                   <span className="title">移動 · {legTitle(item.leg, legs.indexOf(item.leg))}</span>
                   <span className="sub">
-                    {item.leg.km} km · {formatDuration(item.leg.end - item.leg.start)} · {modeName(modeOf(item.leg).mode)}
+                    {legKm(item.leg)} km · {formatDuration(item.leg.end - item.leg.start)} · {modeName(modeOf(item.leg).mode)}
                   </span>
                 </span>
               </button>
@@ -683,6 +719,12 @@ function LegCard({
   onNext,
   onClose,
   onMode,
+  km,
+  edited,
+  drawing,
+  drawBusy,
+  onDraw,
+  onRestore,
 }: {
   leg: Leg
   title: string
@@ -695,8 +737,24 @@ function LegCard({
   onNext: () => void
   onClose: () => void
   onMode: (m: TravelMode | null) => void
+  km: number
+  edited: boolean
+  drawing: boolean
+  drawBusy: boolean
+  onDraw: () => void
+  onRestore: () => void
 }) {
   const dur = leg.end - leg.start
+  // 畫線時卡片縮成一行，讓出地圖空間
+  if (drawing)
+    return (
+      <section className="leg-card leg-card-drawing" aria-label={`手繪修改：${title}`}>
+        <p className="leg-draw-hint">用一根手指在地圖上沿著實際走的路畫一次，放開就完成。要放大先用兩指縮放。</p>
+        <div className="leg-edit">
+          <button onClick={onDraw}>取消手繪</button>
+        </div>
+      </section>
+    )
   return (
     <section className="leg-card" aria-label={`移動：${title}`}>
       <div className="leg-card-head">
@@ -714,7 +772,7 @@ function LegCard({
         </div>
         <div>
           <span>距離</span>
-          <b>{leg.km} km</b>
+          <b>{km} km</b>
         </div>
         <div>
           <span>花了</span>
@@ -736,6 +794,17 @@ function LegCard({
           ))}
         </select>
       </label>
+      {drawBusy && <p className="leg-draw-hint">貼齊道路中…</p>}
+      <div className="leg-edit">
+        <button onClick={onDraw} disabled={drawBusy}>
+          {edited ? '重新手繪' : '手繪修改路線'}
+        </button>
+        {edited && (
+          <button onClick={onRestore} disabled={drawBusy}>
+            還原自動路線
+          </button>
+        )}
+      </div>
       <div className="leg-nav">
         <button disabled={!hasPrev} onClick={onPrev}>
           ‹ 上一段

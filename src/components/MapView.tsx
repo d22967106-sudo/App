@@ -55,6 +55,9 @@ interface Props {
   onSelect?: (id: string) => void
   /** 播放中的位置 */
   playhead?: GeoPoint | null
+  /** 手繪模式：地圖不能拖動，用手指畫一條線，放開時回傳畫的點 */
+  drawMode?: boolean
+  onDrawEnd?: (points: GeoPoint[]) => void
   /** 按「定位」後的目前位置（at 變了就移過去） */
   myLocation?: (GeoPoint & { at: number }) | null
   /** 小地圖：不能拖動 */
@@ -119,6 +122,8 @@ export function MapView({
   selectedId,
   onSelect,
   playhead,
+  drawMode = false,
+  onDrawEnd,
   myLocation,
   static: isStatic = false,
   fallbackCenter,
@@ -287,6 +292,82 @@ export function MapView({
     map.flyTo(map.unproject(pt, zoom), zoom, { duration: 0.6 })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [myLocation?.at])
+
+  // 手繪模式：鎖住地圖，手指畫線
+  const onDrawEndRef = useRef(onDrawEnd)
+  onDrawEndRef.current = onDrawEnd
+  useEffect(() => {
+    const map = mapRef.current
+    const el = elRef.current
+    if (!map || !el || !drawMode) return
+    // 一根手指畫線；兩根手指照樣可以縮放（Leaflet 的兩指縮放用 touch 事件，不受下面攔 pointer 影響）
+    map.dragging.disable()
+    map.doubleClickZoom.disable()
+    map.scrollWheelZoom.disable()
+    const prevTouch = el.style.touchAction
+    el.style.touchAction = 'none'
+    let line: L.Polyline | null = null
+    let pts: L.LatLng[] = []
+    let drawing = false
+    const fingers = new Set<number>()
+    const at = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect()
+      return map.containerPointToLatLng(L.point(e.clientX - r.left, e.clientY - r.top))
+    }
+    const down = (e: PointerEvent) => {
+      fingers.add(e.pointerId)
+      if (fingers.size > 1) {
+        // 第二根手指：取消這一筆，讓它縮放
+        drawing = false
+        line?.remove()
+        line = null
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      drawing = true
+      el.setPointerCapture?.(e.pointerId)
+      pts = [at(e)]
+      line?.remove()
+      line = L.polyline(pts, { color: '#B5473A', weight: 5, opacity: 0.9, interactive: false }).addTo(map)
+    }
+    const move = (e: PointerEvent) => {
+      if (!drawing) return
+      e.preventDefault()
+      e.stopPropagation()
+      const p = at(e)
+      if (map.latLngToContainerPoint(p).distanceTo(map.latLngToContainerPoint(pts[pts.length - 1])) < 3) return
+      pts.push(p)
+      line?.setLatLngs(pts)
+    }
+    const up = (e: PointerEvent) => {
+      fingers.delete(e.pointerId)
+      if (!drawing) return
+      e.preventDefault()
+      e.stopPropagation()
+      drawing = false
+      if (pts.length >= 2) onDrawEndRef.current?.(pts.map((p) => ({ lat: p.lat, lng: p.lng })))
+    }
+    // capture：在 Leaflet 自己的處理之前攔下來
+    el.addEventListener('pointerdown', down, true)
+    el.addEventListener('pointermove', move, true)
+    el.addEventListener('pointerup', up, true)
+    el.addEventListener('pointercancel', up, true)
+    return () => {
+      el.removeEventListener('pointerdown', down, true)
+      el.removeEventListener('pointermove', move, true)
+      el.removeEventListener('pointerup', up, true)
+      el.removeEventListener('pointercancel', up, true)
+      line?.remove()
+      el.style.touchAction = prevTouch
+      if (!isStatic) {
+        map.dragging.enable()
+        map.doubleClickZoom.enable()
+        map.scrollWheelZoom.enable()
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawMode])
 
   // 播放位置
   useEffect(() => {

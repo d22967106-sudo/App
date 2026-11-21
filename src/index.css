@@ -3173,6 +3173,43 @@ button:disabled {
   opacity: 0.4;
 }
 
+/* 手繪修改路線 */
+.leg-card-drawing .leg-edit {
+  margin-bottom: 0;
+}
+
+.leg-edit {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.leg-edit button {
+  flex: 1;
+  height: 36px;
+  border: 1.5px solid var(--primary);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.leg-edit button:disabled {
+  opacity: 0.4;
+}
+
+.leg-draw-hint {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #fbe9e4;
+  color: #8a3326;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .row .badge.leg {
   background: var(--soft);
   color: var(--primary);

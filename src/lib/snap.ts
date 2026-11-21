@@ -393,3 +393,51 @@ export async function setLegMode(date: string, legId: string, mode: TravelMode |
   await setMeta('route.legModes', all)
   changed()
 }
+
+// ── 手繪修改路線（2026-11-22 使用者要求：自己畫實際走的路，取代自動路線） ──
+
+type EditMap = Record<string, [number, number][]>
+
+/** 手繪修改過的路線（key＝日期/段 id），存在手機上 */
+export async function getLegEdits(): Promise<EditMap> {
+  return (await getMeta<EditMap>('route.legEdits')) ?? {}
+}
+
+export async function setLegEdit(date: string, legId: string, line: GeoPoint[] | null): Promise<void> {
+  const all = await getLegEdits()
+  const k = `${date}/${legId}`
+  if (line) all[k] = line.map((p) => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lng * 1e6) / 1e6])
+  else delete all[k]
+  await setMeta('route.legEdits', all)
+  changed()
+}
+
+/**
+ * 手畫的線貼齊道路：手指畫的點很密（官方文件建議的密度），用 trace_route 對到道路；
+ * 不貼齊（火車等）、連不上或失敗就用畫的線（太近的點去掉）。
+ */
+export async function snapDrawn(drawn: GeoPoint[], mode: TravelMode, fetcher: typeof fetch = fetch): Promise<GeoPoint[]> {
+  // 相隔 8 m 以內的點去掉，最多 CHUNK 個
+  const pts: GeoPoint[] = []
+  for (const p of drawn) if (!pts.length || distanceM(pts[pts.length - 1], p) >= 8) pts.push(p)
+  if (drawn.length && pts[pts.length - 1] !== drawn[drawn.length - 1]) pts.push(drawn[drawn.length - 1])
+  const line = thin(pts, CHUNK)
+  if (mode === 'none' || line.length < 2) return line
+  try {
+    const out = await valhalla(
+      'trace_route',
+      {
+        encoded_polyline: encodePolyline(line),
+        costing: COSTING[mode],
+        shape_match: 'map_snap',
+        // 手指畫的線離道路通常 10～20 m（畫在路旁邊）
+        trace_options: { gps_accuracy: 15, search_radius: 40 },
+      },
+      fetcher,
+    )
+    if (lengthM(out) > lengthM(line) * 1.5 + 100) return line
+    return out
+  } catch {
+    return line
+  }
+}
