@@ -189,11 +189,11 @@ const SAME_ROAD_M = 10
  * 點到折線的最近距離，和最近的位置（線段序號＋比例，用來排順序）。
  * 只從 minSeg 段往後找；幾段差不多近（例如迴轉時去回同一條路）就取最早的那段。
  */
-function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSeg = 0): { d: number; at: number } {
+function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSeg = 0, maxSeg = Infinity): { d: number; at: number } {
   const [px, py] = toXY(o, p)
   if (line.length === 1) return { d: Math.hypot(px - line[0][0], py - line[0][1]), at: 0 }
   const cands: { d: number; at: number }[] = []
-  for (let i = Math.max(0, minSeg); i < line.length - 1; i++) {
+  for (let i = Math.max(0, minSeg); i < Math.min(line.length - 1, maxSeg + 1); i++) {
     const [ax, ay] = line[i]
     const [bx, by] = line[i + 1]
     const dx = bx - ax
@@ -215,11 +215,29 @@ export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
   if (snapped.length < 3 || raw.length < 2) return snapped
   const o = raw[0]
   const line = raw.map((p) => toXY(o, p))
-  // 沿著實際的路線依序對：每個貼齊的點只往後找（離太遠的點不推進位置）
+  // 沿著實際的路線依序對：每個貼齊的點只往後找（離太遠的點不推進位置），
+  // 而且最多往前推進「貼齊的線走過的距離 × 1.5 + 100 m」——同一個地方經過兩次（例如繞一圈回到家附近）時，
+  // 不會一下子跳到後面那次，把中間整圈當成繞路刪掉（2026-11-21 找停車位繞了一圈不見）
+  const cum = [0]
+  for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]))
+  const arcAt = (at: number) => {
+    const i = Math.min(Math.floor(at), line.length - 1)
+    return cum[i] + (i < line.length - 1 ? (at - i) * (cum[i + 1] - cum[i]) : 0)
+  }
   let minSeg = 0
-  const near = snapped.map((p) => {
-    const n = nearestOnLine(o, line, p, minSeg)
-    if (n.d <= DETOUR_M) minSeg = Math.floor(n.at)
+  let lastArc = 0
+  let traveled = 0
+  const near = snapped.map((p, k) => {
+    if (k) traveled += distanceM(snapped[k - 1], p)
+    const maxArc = lastArc + traveled * 1.5 + 100
+    let maxSeg = minSeg
+    while (maxSeg + 1 < line.length - 1 && cum[maxSeg + 1] <= maxArc) maxSeg++
+    const n = nearestOnLine(o, line, p, minSeg, maxSeg)
+    if (n.d <= DETOUR_M) {
+      minSeg = Math.floor(n.at)
+      lastArc = arcAt(n.at)
+      traveled = 0
+    }
     return n
   })
   const off = near.map((n) => n.d > DETOUR_M)

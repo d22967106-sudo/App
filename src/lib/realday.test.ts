@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, guessMode, withCarry } from './legs'
-import { tidySnapped } from './snap'
+import { fixDetours, tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
@@ -129,5 +129,34 @@ describe('真實的一天：迴轉處的小三角', () => {
     const minLat = Math.min(...out.map((p) => p.lat))
     const tip = out.findIndex((p) => p.lat === minLat)
     for (const p of out.slice(tip)) expect((p.lng - (121.4525 - 1.001)) * 101000).toBeLessThan(12)
+  })
+})
+
+/** 同一天 23:09–23:34 找停車位（機車）的原始點，平移。中間往西、往北繞一圈，前後兩次經過家附近。 */
+const PARKING = [
+  '23.467953,120.451636 23.470513,120.451677 23.471773,120.451682 23.473519,120.450788 23.474477,120.450847 23.474458,120.451294',
+  '23.474356,120.451305 23.474494,120.451340 23.474619,120.451240 23.474415,120.451290 23.474520,120.451189 23.474490,120.451287',
+  '23.474482,120.450529 23.474725,120.448723 23.474302,120.446666 23.474393,120.446628 23.475935,120.446398 23.476260,120.446390',
+  '23.477917,120.447067 23.478542,120.447754 23.479755,120.448584 23.479753,120.450086 23.480044,120.449993 23.480434,120.450110',
+  '23.480072,120.449016 23.479793,120.447899 23.479794,120.447124 23.480859,120.446847 23.481224,120.446830 23.481320,120.446857',
+  '23.481276,120.449082 23.481333,120.449619 23.481334,120.449815 23.481304,120.450011 23.481015,120.450181 23.480697,120.450412',
+  '23.480495,120.450331 23.480157,120.450281 23.480113,120.450101',
+]
+  .join(' ')
+  .split(' ')
+  .map((s) => {
+    const [lat, lng] = s.split(',').map(Number)
+    return { lat, lng }
+  })
+
+describe('真實的一天：找停車位繞一圈', () => {
+  it('同一個地方經過兩次，中間那一圈不會被當成繞路刪掉', () => {
+    // 假的貼齊結果：照原始點走，在第一次經過家附近時多一個 Valhalla 畫出的點（實際手機上的那個點）
+    const snapped = [...PARKING.slice(0, 22), { lat: 25.053245 - 1.573, lng: 121.451425 - 1.001 }, ...PARKING.slice(22)]
+    for (const out of [fixDetours(snapped, PARKING), tidySnapped(snapped, PARKING)]) {
+      // 往西北那一圈（原本 25.0543,121.4478 一帶）還在
+      expect(out.some((p) => p.lng < 121.4482 - 1.001 && p.lat > 25.0535 - 1.573)).toBe(true)
+      expect(out.length).toBeGreaterThanOrEqual(PARKING.length - 1)
+    }
   })
 })
