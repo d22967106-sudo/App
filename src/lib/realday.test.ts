@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, guessMode, withCarry } from './legs'
-import { fixDetours, tidySnapped } from './snap'
+import { tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
@@ -121,10 +121,13 @@ describe('真實的一天：迴轉處的小三角', () => {
     const t = track()
     const leg = computeLegs(t, dayStays(t)).at(-1)!
     const out = tidySnapped(DRAWN, leg.points)
+    // 每個實際的點都在路線上
+    expect(leg.points.every((r) => out.some((p) => p.lat === r.lat && p.lng === r.lng))).toBe(true)
+    // 大部分還是沿著貼齊的道路畫（不是全部退回直線）
+    const fromSnap = out.filter((p) => DRAWN.some((d) => d.lat === p.lat && d.lng === p.lng)).length
+    expect(fromSnap).toBeGreaterThan(DRAWN.length * 0.7)
     // 三角形那個點（原本 25.040082,121.452549）不見了
     expect(out.some((p) => distanceM(p, { lat: 25.040082 - 1.573, lng: 121.452549 - 1.001 }) < 3)).toBe(false)
-    // 只動到最後迴轉那附近（前面 60 個點都還在）
-    expect(out.slice(0, 60)).toEqual(DRAWN.slice(0, 60))
     // 迴轉後沒有任何點偏到路東邊超過 12 m
     const minLat = Math.min(...out.map((p) => p.lat))
     const tip = out.findIndex((p) => p.lat === minLat)
@@ -153,7 +156,9 @@ describe('真實的一天：找停車位繞一圈', () => {
   it('同一個地方經過兩次，中間那一圈不會被當成繞路刪掉', () => {
     // 假的貼齊結果：照原始點走，在第一次經過家附近時多一個 Valhalla 畫出的點（實際手機上的那個點）
     const snapped = [...PARKING.slice(0, 22), { lat: 25.053245 - 1.573, lng: 121.451425 - 1.001 }, ...PARKING.slice(22)]
-    for (const out of [fixDetours(snapped, PARKING), tidySnapped(snapped, PARKING)]) {
+    for (const out of [tidySnapped(snapped, PARKING)]) {
+      // 每個實際的點都在路線上
+      expect(PARKING.every((r) => out.some((p) => p.lat === r.lat && p.lng === r.lng))).toBe(true)
       // 往西北那一圈（原本 25.0543,121.4478 一帶）還在
       expect(out.some((p) => p.lng < 121.4482 - 1.001 && p.lat > 25.0535 - 1.573)).toBe(true)
       expect(out.length).toBeGreaterThanOrEqual(PARKING.length - 1)

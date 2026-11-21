@@ -169,12 +169,19 @@ async function requestChunk(points: TrackPoint[], costing: string, fetcher: type
   }
 }
 
-// ── 繞路修正 ──
+// ── 貼齊後對回實際的點 ──
+//
+// 原則（2026-11-21 使用者定的）：實際收到的定位點是事實，路線一定要經過每一個點、一個都不能丟；
+// 貼齊道路只用來補「兩個點之間怎麼走」。所以：
+//   1. 依序找每個點在貼齊線上的位置（離線不超過容許距離才算經過）
+//   2. 相鄰兩個點之間，貼齊線那一段長度合理才用；太長（繞街區，例如路中迴轉不被允許）就直線連過去
+//   3. 貼齊線沒經過的點，直線連過去
+// 以前的做法（先貼齊、再找繞路、拿尖刺）會把真的點丟在路線外，已經拿掉。
 
-/** 貼齊後的線離實際的點超過這麼遠（公尺）＝繞路 */
-export const DETOUR_M = 25
-/** 兩段繞路中間只隔這麼短（公尺）的正常線，就當成同一段繞路 */
-const DETOUR_GAP_M = 30
+/** 點要離貼齊線多近才算「線經過它」：精確度的 1.5 倍，夾在 20～50 m */
+const passTol = (acc?: number) => clamp((acc ?? 20) * 1.5, 20, 50)
+/** 兩個點之間的貼齊線最多可以比直線長多少：× 1.4 或多 40 m，取大的 */
+const maxBetween = (straight: number) => Math.max(straight * 1.4, straight + 40)
 
 /** 以 o 為原點的平面座標（公尺），短距離夠準 */
 function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
@@ -182,151 +189,78 @@ function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
   return [((p.lng - o.lng) * Math.PI * 6371008.8 * k) / 180, ((p.lat - o.lat) * Math.PI * 6371008.8) / 180]
 }
 
-/** 去程、回程疊在同一條路上時，距離差不到這麼多（公尺）就算在較早的那段 */
-const SAME_ROAD_M = 10
-
 /**
- * 點到折線的最近距離，和最近的位置（線段序號＋比例，用來排順序）。
- * 只從 minSeg 段往後找；幾段差不多近（例如迴轉時去回同一條路）就取最早的那段。
+ * 路線一定經過每個實際的點；點和點之間能用貼齊道路的線就用，不合理就直線。
+ * raw：這段移動的實際定位點（依時間）。snapped：貼齊道路服務回來的線。
  */
-function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSeg = 0, maxSeg = Infinity): { d: number; at: number } {
-  const [px, py] = toXY(o, p)
-  if (line.length === 1) return { d: Math.hypot(px - line[0][0], py - line[0][1]), at: 0 }
-  const cands: { d: number; at: number }[] = []
-  for (let i = Math.max(0, minSeg); i < Math.min(line.length - 1, maxSeg + 1); i++) {
-    const [ax, ay] = line[i]
-    const [bx, by] = line[i + 1]
+export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number })[]): GeoPoint[] {
+  if (raw.length < 2) return raw.slice()
+  if (snapped.length < 2) return raw.slice()
+  const o = raw[0]
+  const S = snapped.map((p) => toXY(o, p))
+  const cum = [0]
+  for (let i = 1; i < S.length; i++) cum.push(cum[i - 1] + Math.hypot(S[i][0] - S[i - 1][0], S[i][1] - S[i - 1][1]))
+  const arcAt = (at: number) => {
+    const i = Math.min(Math.floor(at), S.length - 1)
+    return i >= S.length - 1 ? cum[S.length - 1] : cum[i] + (at - i) * (cum[i + 1] - cum[i])
+  }
+  /** 線段 i 上離 p 最近的位置 */
+  const onSeg = (i: number, px: number, py: number) => {
+    const [ax, ay] = S[i]
+    const [bx, by] = S[i + 1]
     const dx = bx - ax
     const dy = by - ay
     const len2 = dx * dx + dy * dy
     const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0
-    cands.push({ d: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), at: i + t })
+    return { d: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), at: i + t }
   }
-  if (!cands.length) return { d: Infinity, at: minSeg }
-  const min = Math.min(...cands.map((c) => c.d))
-  return cands.find((c) => c.d <= min + SAME_ROAD_M)!
-}
 
-/**
- * 貼齊道路有時會繞一圈：例如騎過頭在路中間迴轉，路線服務不允許路中迴轉，就繞街區一圈接回來。
- * 貼齊後的線離實際的點超過 DETOUR_M 的那幾段，改成照實際的點畫（直線）。
- */
-export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
-  if (snapped.length < 3 || raw.length < 2) return snapped
-  const o = raw[0]
-  const line = raw.map((p) => toXY(o, p))
-  // 沿著實際的路線依序對：每個貼齊的點只往後找（離太遠的點不推進位置），
-  // 而且最多往前推進「貼齊的線走過的距離 × 1.5 + 100 m」——同一個地方經過兩次（例如繞一圈回到家附近）時，
-  // 不會一下子跳到後面那次，把中間整圈當成繞路刪掉（2026-11-21 找停車位繞了一圈不見）
-  const cum = [0]
-  for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + Math.hypot(line[i][0] - line[i - 1][0], line[i][1] - line[i - 1][1]))
-  const arcAt = (at: number) => {
-    const i = Math.min(Math.floor(at), line.length - 1)
-    return cum[i] + (i < line.length - 1 ? (at - i) * (cum[i + 1] - cum[i]) : 0)
-  }
-  let minSeg = 0
-  let lastArc = 0
-  let traveled = 0
-  const near = snapped.map((p, k) => {
-    if (k) traveled += distanceM(snapped[k - 1], p)
-    const maxArc = lastArc + traveled * 1.5 + 100
-    let maxSeg = minSeg
-    while (maxSeg + 1 < line.length - 1 && cum[maxSeg + 1] <= maxArc) maxSeg++
-    const n = nearestOnLine(o, line, p, minSeg, maxSeg)
-    if (n.d <= DETOUR_M) {
-      minSeg = Math.floor(n.at)
-      lastArc = arcAt(n.at)
-      traveled = 0
-    }
-    return n
-  })
-  const off = near.map((n) => n.d > DETOUR_M)
-  if (!off.some(Boolean)) return snapped
-  // 找出繞路的範圍，中間只隔一小段正常線的併成一段
-  const runs: [number, number][] = []
-  for (let i = 0; i < off.length; i++) {
-    if (!off[i]) continue
-    let j = i
-    while (j + 1 < off.length && off[j + 1]) j++
-    const prev = runs[runs.length - 1]
-    if (prev) {
-      let gap = 0
-      for (let k = prev[1]; k < i; k++) gap += distanceM(snapped[k], snapped[k + 1])
-      if (gap <= DETOUR_GAP_M) {
-        prev[1] = j
-        i = j
-        continue
+  // 1. 依序找每個點在貼齊線上的位置；只往後找，而且最多往前「跟上一點的直線距離 × 3 + 150 m」
+  //    （同一個地方經過兩次時不會跳到後面那次）
+  const pos: (number | null)[] = []
+  let at = 0
+  for (let r = 0; r < raw.length; r++) {
+    const [px, py] = toXY(o, raw[r])
+    const tol = passTol(raw[r].accuracy)
+    const limit = arcAt(at) + (r ? distanceM(raw[r - 1], raw[r]) * 3 : 0) + 150
+    let found: { d: number; at: number } | null = null
+    for (let i = Math.floor(at); i < S.length - 1 && cum[i] <= limit; i++) {
+      const c = onSeg(i, px, py)
+      if (c.at < at) continue
+      if (c.d <= tol) {
+        // 找到第一段經過的，再往後看相連的幾段取最近的位置
+        found = c
+        for (let j = i + 1; j < S.length - 1; j++) {
+          const n = onSeg(j, px, py)
+          if (n.d > tol) break
+          if (n.d < found.d) found = n
+        }
+        break
       }
     }
-    runs.push([i, j])
-    i = j
+    pos.push(found ? found.at : null)
+    if (found) at = found.at
   }
-  const out: GeoPoint[] = []
-  let k = 0
-  for (const [i, j] of runs) {
-    const a = Math.max(0, i - 1)
-    const b = Math.min(snapped.length - 1, j + 1)
-    const from = near[a].at
-    const to = near[b].at
-    const mid: GeoPoint[] = []
-    if (to > from) for (let r = Math.floor(from) + 1; r <= Math.ceil(to) - 1 && r < raw.length; r++) mid.push(raw[r])
-    // 只有真的繞一圈才改：貼齊的那段比照實際的點走長 1.5 倍又多 40 m 以上
-    // （2026-11-21 實際的例子：迴轉處繞了一個約 50 × 55 m 的小街區）。
-    // 點跟點之間本來就是彎路（30 秒一點、騎車時相隔幾百公尺）那種偏離是對的，不能改成直線。
-    const snapLen = lengthM(snapped.slice(a, b + 1))
-    const rawLen = lengthM([snapped[a], ...mid, snapped[b]])
-    if (snapLen <= rawLen * 1.5 + 40) continue
-    out.push(...snapped.slice(k, a + 1), ...mid)
-    k = b
+
+  // 2. 接起來：每個實際的點都放進路線；兩個都被經過的相鄰點之間，貼齊線合理才用
+  const out: GeoPoint[] = [raw[0]]
+  for (let r = 1; r < raw.length; r++) {
+    const a = pos[r - 1]
+    const b = pos[r]
+    if (a != null && b != null && b > a) {
+      const len = arcAt(b) - arcAt(a)
+      if (len <= maxBetween(distanceM(raw[r - 1], raw[r]))) {
+        for (let i = Math.floor(a) + 1; i < b && i < snapped.length; i++) out.push(snapped[i])
+      }
+    }
+    out.push(raw[r])
   }
-  out.push(...snapped.slice(k))
   return out
 }
 
-/** 尖刺：線在這個點折回去的夾角小於這個（度） */
-const SPIKE_DEG = 60
-/** …而且這個點離實際路線超過這麼遠（公尺）才拿掉 */
-const SPIKE_OFF_M = 10
-
-/**
- * 拿掉尖刺：貼齊後線突然折回去（夾角 < 60°）、而且那個點離實際的點超過 10 m（繞路修掉後剩下的小三角、迴轉時衝過頭的部分）。
- * 一般路口轉彎約 90°，不會被拿掉。頭尾不動。
- */
-export function removeSpikes(path: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
-  if (path.length < 3 || raw.length < 2) return path
-  const o = raw[0]
-  const line = raw.map((p) => toXY(o, p))
-  const pts = path.slice()
-  for (let changed = true; changed; ) {
-    changed = false
-    for (let i = 1; i < pts.length - 1; i++) {
-      const [ax, ay] = toXY(o, pts[i - 1])
-      const [bx, by] = toXY(o, pts[i])
-      const [cx, cy] = toXY(o, pts[i + 1])
-      const u = [ax - bx, ay - by]
-      const v = [cx - bx, cy - by]
-      const lu = Math.hypot(u[0], u[1])
-      const lv = Math.hypot(v[0], v[1])
-      if (lu < 1 || lv < 1) {
-        // 重複的點直接拿掉
-        pts.splice(i, 1)
-        changed = true
-        break
-      }
-      const deg = (Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))) * 180) / Math.PI
-      if (deg < SPIKE_DEG && nearestOnLine(o, line, pts[i]).d > SPIKE_OFF_M) {
-        pts.splice(i, 1)
-        changed = true
-        break
-      }
-    }
-  }
-  return pts
-}
-
-/** 貼齊後的整理：先修繞路，再拿掉尖刺 */
-export function tidySnapped(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
-  return removeSpikes(fixDetours(snapped, raw), raw)
+/** 貼齊後的整理：路線經過每個實際的點，點之間能貼齊就貼齊 */
+export function tidySnapped(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number })[]): GeoPoint[] {
+  return alignToRaw(snapped, raw)
 }
 
 function lengthM(pts: GeoPoint[]): number {
