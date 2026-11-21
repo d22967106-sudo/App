@@ -187,7 +187,7 @@
 - [x] 使用者執行 automation.sql、產生金鑰、設定 Overland／捷徑（記一筆、記步數）／Scriptable（2026-11-18）
 - [x] 使用者在 iPhone 上實測一整天：出門的路線與「抵達／離開」、步數（改成按小工具時送）、Overland 耗電、小工具「今天在／路線」切換（2026-11-19）
 - [ ] （可選）C3 記下位置捷徑
-- [x] App 名稱改「摳摳手帳」（2026-11-19）：標題、manifest、設定頁底部、備份檔名、小工具標題（腳本版本 2026-11-19.1，要重新貼上）。**捷徑名稱「打開記帳日記」與 Scriptable 腳本名稱沒改**（使用者手機上已經這樣命名，改了會打不開）。程式碼註解、repo 名稱、備份格式 `ledger-diary-backup` 不變。在工作分支 `claude/eloquent-faraday-9t5s59`，要合併到預設分支才會發布。
+- [x] App 名稱改「摳摳手帳」（2026-11-19）：標題、manifest、設定頁底部、備份檔名、小工具標題（腳本版本 2026-11-19.1，要重新貼上）。**捷徑名稱「打開記帳日記」與 Scriptable 腳本名稱當時沒改**（2026-11-21 使用者已把捷徑改成「打開摳摳手帳」，範本已跟著改）。程式碼註解、repo 名稱、備份格式 `ledger-diary-backup` 不變。在工作分支 `claude/eloquent-faraday-9t5s59`，要合併到預設分支才會發布。
 
 ## 第 4 階段：進階
 
@@ -245,6 +245,7 @@
        - 結果：早上兩段走路＋晚上 22:16 騎車一段。全部 123 項。
        - 也看到：07:59～22:14 Overland 完全沒送點（在家不動，Min Distance 10m 把點丟掉），但定位一直開著——跟耗電有關。
   - 小工具路線縮圖加地圖底圖（2026-11-21，使用者回報「只顯示路線沒有地圖」）：腳本版本 2026-11-21.1，`routeImage` 改成 async，用 OSM 圖磚（`tile.openstreetmap.org`，跟 App 的 OSM 奶茶同來源）：找放得下整條路線的最大縮放層級（最多 17）、256 px 圖磚畫成 128 點（3 倍螢幕清楚）、蓋一層半透明奶茶色（DrawContext 沒有 multiply）、路線加白邊、右下「© OpenStreetMap」。圖磚存在 Scriptable 的 cacheDirectory `ledger-tiles/`，14 天內不重抓，載不到就用舊的，都沒有就只畫路線。User-Agent 設成 `KoukouLedgerWidget/1.0`。開發環境連不到 OSM，用 Playwright＋假的 Scriptable API＋假圖磚看過位置正確（一段 1.4 km 的路線用 z14、2 塊圖磚）。**使用者要重新複製腳本貼到 Scriptable**。
+  - 2026-11-21 使用者已把捷徑改名「打開摳摳手帳」，並自己改了 Scriptable 腳本（**我漏改，使用者說下不為例**）。範本 `OPEN_SHORTCUT` 改成「打開摳摳手帳」，腳本版本 2026-11-21.2，setup-automation.md 一起改。**教訓：改到 Scriptable 腳本或捷徑相關的東西時，先確認使用者手機上現在的名稱（捷徑名稱、腳本名稱），範本要跟著改。**
   - 耗電（第 2 點）使用者目標：**一天 10% 以下、而且不影響程式運作**（短距離走路還要抓得到）。Overland 的 Auto-Stop 是 2026-10-29 才加進原始碼（在 1.4 版號之後），App Store 版本有沒有還不確定（開發環境連不到 apps.apple.com）。待討論。
   2. **Overland 21 小時耗電 14%**（11/19 量到的是背景 21 時 18 分占 7%）。Overland 官網（overland.p3k.app）在開發環境連不到，改看 GitHub 原始碼（aaronpk/Overland-iOS，1.4 版，2026-11-12）：「Standard」模式＋不暫停＝整天開著定位，連在家睡覺也是，這是主要耗電來源；Min Distance／Min Time／Discard points while stationary 只是丟掉點、不會關定位，不省電。新版有 **Auto-Stop Radius／Auto-Stop After**（在半徑內待滿設定時間就關掉定位，靠「重大位置變更」或 Resume with Geofence 的圍欄離開時再開），這是省電的正解，但代價是離開時要走出圍欄（最小 100 m，iOS 圍欄偵測常常更晚）才恢復，**短距離走路會更容易漏掉**，和問題 1 互相衝突，要使用者選。App Store 上的版本有沒有 Auto-Stop 還沒確認（請使用者看設定頁有沒有這兩項）。
 - 掃發票先不做；停留提醒、軌跡精簡不做（見上）。

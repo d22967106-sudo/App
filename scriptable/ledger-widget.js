@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-21.1
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-21.2
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -364,10 +364,10 @@ function accessoryWidget(d) {
   return w
 }
 
-// 點小工具 → Scriptable 用 ?open=1 執行這個腳本 → 交給捷徑「打開記帳日記」
+// 點小工具 → Scriptable 用 ?open=1 執行這個腳本 → 交給捷徑「打開摳摳手帳」
 // → 捷徑用 webapp://網址 打開主畫面上的 App（不是 Safari）。
 // 小工具直接設 webapp:// 或 shortcuts:// 網址，實測都只會停在 Scriptable 的腳本列表。
-const OPEN_SHORTCUT = '打開記帳日記'
+const OPEN_SHORTCUT = '打開摳摳手帳'
 const openApp = (args.queryParameters || {}).open === '1'
 if (openApp) {
   Safari.open('shortcuts://run-shortcut?name=' + encodeURIComponent(OPEN_SHORTCUT))
