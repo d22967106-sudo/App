@@ -32,6 +32,9 @@ function formatDuration(ms: number): string {
 }
 
 /** 11/19 22:10 */
+/** 建置時間（台灣時間）：2026-11-22 00:15 → 11/22 00:15 */
+const APP_VERSION = __BUILD_DATE__.replace(/^\d+-0?(\d+)-0?(\d+)/, '$1/$2')
+
 function formatShort(ms: number): string {
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()} ${formatTime(ms)}`
@@ -529,6 +532,8 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
               </span>
               {steps && <span>{steps.steps.toLocaleString('en-US')} 步</span>}
               {lastAuto && <span>背景定位 {isCarry(lastAuto) ? formatShort(lastAuto.carriedFrom!) : formatTime(lastAuto.time)}</span>}
+              {/* App 版本（建置時間），每次更新後確認有沒有換成新版 */}
+              <span>版本 {APP_VERSION}</span>
             </div>
           </div>
         </div>
