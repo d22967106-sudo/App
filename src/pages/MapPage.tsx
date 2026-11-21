@@ -14,7 +14,7 @@ import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
 import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
-import { getLegEdits, getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
+import { getLegEdits, getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, spliceLine, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto, MAX_ACCURACY } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
@@ -458,12 +458,16 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           setDrawing(false)
           setDrawBusy(true)
           const mode = modeOf(pickedLeg).mode
-          const line = routeSettings.snap ? await snapDrawn(pts, mode) : pts
+          const piece = routeSettings.snap ? await snapDrawn(pts, mode) : pts
+          // 只換掉畫的那一小段（頭尾接回目前的線）；頭尾離目前的線太遠才整段換掉
+          const base = legLine(pickedLeg)
+          const line = spliceLine(base, piece)
           await setLegEdit(date, pickedLeg.id, line)
           setDrawBusy(false)
-          toast('已用你畫的路線取代這段')
+          toast(line === piece ? '已用你畫的路線取代整段' : '已修改你畫的那一小段')
         }}
-        focus={pickedLeg ? legLine(pickedLeg) : null}
+        // 對焦只看這段的定位點：手繪修改或貼齊完成時畫面不會跳（一段一段修改時才找得到剛才的位置）
+        focus={pickedLeg ? pickedLeg.points : null}
         markers={markers}
         dots={dots}
         selectedId={selected}
@@ -749,7 +753,7 @@ function LegCard({
   if (drawing)
     return (
       <section className="leg-card leg-card-drawing" aria-label={`手繪修改：${title}`}>
-        <p className="leg-draw-hint">用一根手指在地圖上沿著實際走的路畫一次，放開就完成。要放大先用兩指縮放。</p>
+        <p className="leg-draw-hint">只要畫錯的那一小段：從原本的線上開始畫、畫回原本的線上放開，就只換掉中間那段（可以一段一段改）。要放大用兩指縮放。</p>
         <div className="leg-edit">
           <button onClick={onDraw}>取消手繪</button>
         </div>
@@ -797,7 +801,7 @@ function LegCard({
       {drawBusy && <p className="leg-draw-hint">貼齊道路中…</p>}
       <div className="leg-edit">
         <button onClick={onDraw} disabled={drawBusy}>
-          {edited ? '重新手繪' : '手繪修改路線'}
+          {edited ? '再修改一段' : '手繪修改路線'}
         </button>
         {edited && (
           <button onClick={onRestore} disabled={drawBusy}>

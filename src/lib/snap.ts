@@ -441,3 +441,46 @@ export async function snapDrawn(drawn: GeoPoint[], mode: TravelMode, fetcher: ty
     return line
   }
 }
+
+/** 局部手繪：頭尾離原本的線超過這麼遠（公尺）就當成整段重畫 */
+const SPLICE_MAX_GAP_M = 80
+
+/**
+ * 局部手繪（2026-11-22 使用者要求：不用整條重畫，只畫錯的那一小段）：
+ * 畫的線頭尾各找原本的線上最近的位置，只把中間那段換成畫的線；頭尾離原本的線太遠就整段換掉。
+ * 畫的方向跟路線相反也可以（自動反過來）。
+ */
+export function spliceLine(base: GeoPoint[], piece: GeoPoint[]): GeoPoint[] {
+  if (base.length < 2 || piece.length < 2) return piece
+  const o = base[0]
+  const B = base.map((p) => toXY(o, p))
+  const near = (p: GeoPoint) => {
+    const [px, py] = toXY(o, p)
+    let best = { d: Infinity, at: 0 }
+    for (let i = 0; i < B.length - 1; i++) {
+      const [ax, ay] = B[i]
+      const [bx, by] = B[i + 1]
+      const dx = bx - ax
+      const dy = by - ay
+      const len2 = dx * dx + dy * dy
+      const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0
+      const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+      if (d < best.d) best = { d, at: i + t }
+    }
+    return best
+  }
+  let pc = piece
+  let s0 = near(pc[0])
+  let s1 = near(pc[pc.length - 1])
+  if (s0.d > SPLICE_MAX_GAP_M || s1.d > SPLICE_MAX_GAP_M) return piece
+  if (s0.at > s1.at) {
+    pc = pc.slice().reverse()
+    ;[s0, s1] = [s1, s0]
+  }
+  const pointAt = (at: number): GeoPoint => {
+    const i = Math.min(Math.floor(at), base.length - 2)
+    const t = at - i
+    return { lat: base[i].lat + (base[i + 1].lat - base[i].lat) * t, lng: base[i].lng + (base[i + 1].lng - base[i].lng) * t }
+  }
+  return [...base.slice(0, Math.floor(s0.at) + 1), pointAt(s0.at), ...pc, pointAt(s1.at), ...base.slice(Math.ceil(s1.at))]
+}

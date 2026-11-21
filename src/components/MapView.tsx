@@ -176,6 +176,7 @@ export function MapView({
   // 畫路線與標記
   const routeKey = JSON.stringify([route.map((p) => [p.lat, p.lng]), routes?.map((r) => [r.id, r.color, r.dashed, r.weight, r.opacity, r.noCasing, r.points.map((p) => [p.lat, p.lng])])])
   const markerKey = JSON.stringify([markers, dots])
+  const lastFit = useRef('')
   const focusKey = focus ? JSON.stringify(focus.map((p) => [p.lat, p.lng])) : ''
   useEffect(() => {
     const map = mapRef.current
@@ -241,6 +242,10 @@ export function MapView({
       markerRefs.current.set(m.id, mk)
     }
     const all = focus?.length ? focus.map((p) => L.latLng(p.lat, p.lng)) : [...latlngs, ...markers.map((m) => L.latLng(m.lat, m.lng))]
+    // 有對焦目標時，只有目標換了才重新縮放（手繪修改、貼齊完成只是線變了，使用者放大的畫面不要被重設）
+    const fitKey = focus?.length ? `f:${focusKey}` : `a:${routeKey}|${markerKey}`
+    if (focus?.length && fitKey === lastFit.current) return
+    lastFit.current = fitKey
     if (all.length === 1) {
       map.setView(all[0], 16, { animate: false })
     } else if (all.length > 1) {

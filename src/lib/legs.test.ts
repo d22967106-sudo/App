@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, dropWobble, guessMode, withCarry } from './legs'
-import { decodePolyline, encodePolyline, snapDrawn, snapLeg, thin, tidySnapped } from './snap'
+import { decodePolyline, encodePolyline, snapDrawn, snapLeg, spliceLine, thin, tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
@@ -315,4 +315,36 @@ describe('手繪修改路線', () => {
     expect(fallback[0]).toEqual(drawn[0])
     expect(fallback.at(-1)).toEqual(drawn.at(-1))
   }, 10000)
+})
+
+describe('局部手繪：只換掉畫的那一小段', () => {
+  const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+  // 原本的線：往南 1 km（每 100 m 一點）
+  const base = Array.from({ length: 11 }, (_, i) => P(i * 100))
+  const eastOf = (p: { lng: number }) => (p.lng - home.lng) / 0.0000098
+  const southOf = (p: { lat: number }) => (home.lat - p.lat) / 0.000009
+
+  it('從 300 m 處畫到 500 m 處（往東繞 60 m）：只換中間，前後不動', () => {
+    const piece = [P(300, 5), P(320, 60), P(480, 60), P(500, 5)]
+    const out = spliceLine(base, piece)
+    expect(out.slice(0, 4)).toEqual(base.slice(0, 4))
+    expect(out.slice(-6)).toEqual(base.slice(-6))
+    expect(out.some((p) => eastOf(p) > 50)).toBe(true)
+    // 換掉的範圍外沒有往東的點
+    expect(out.filter((p) => eastOf(p) > 10).every((p) => southOf(p) > 300 && southOf(p) < 500)).toBe(true)
+  })
+
+  it('反方向畫（從 500 m 畫回 300 m）也一樣', () => {
+    const piece = [P(500, 5), P(480, 60), P(320, 60), P(300, 5)]
+    const out = spliceLine(base, piece)
+    expect(out.slice(0, 4)).toEqual(base.slice(0, 4))
+    const south = out.map(southOf)
+    // 照順序往南（不會倒著走回去）
+    for (let i = 1; i < south.length; i++) expect(south[i]).toBeGreaterThanOrEqual(south[i - 1] - 25)
+  })
+
+  it('頭尾離原本的線超過 80 m：整段換掉', () => {
+    const piece = [P(0, 200), P(1000, 200)]
+    expect(spliceLine(base, piece)).toEqual(piece)
+  })
 })
