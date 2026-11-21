@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, guessMode, withCarry } from './legs'
-import { decodePolyline, encodePolyline, snapLeg, thin } from './snap'
+import { decodePolyline, encodePolyline, fixDetours, snapLeg, thin } from './snap'
+import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
 const home = { lat: 23.48, lng: 120.45 }
@@ -186,5 +187,32 @@ describe('挑點', () => {
     expect(t).toHaveLength(20)
     expect(t[0]).toBe(0)
     expect(t[19]).toBe(99)
+  })
+})
+
+describe('貼齊道路繞路修正（2026-11-21 騎過頭迴轉，貼齊後繞街區一圈）', () => {
+  // 往南騎 300 m 迴轉、往北騎回 150 m；lat 每 0.00009 度約 10 m，lng 每 0.0000098 度約 1 m（緯度 23.5）
+  const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+  const raw = [0, 50, 100, 150, 200, 250, 300, 250, 200, 150].map((m) => P(m))
+  it('繞街區那段改回照實際的點畫，迴轉的地方保留', () => {
+    // 貼齊結果：往南到 250 m → 往東 100 → 往南 100 → 往西 100（到 350 m）→ 往北回到原路 → 回到 150 m
+    const snapped = [P(0), P(100), P(200), P(250), P(250, 100), P(350, 100), P(350, 0), P(300), P(250), P(200), P(150)]
+    const fixed = fixDetours(snapped, raw)
+    const maxOff = Math.max(...fixed.map((p) => Math.min(...raw.map((r) => distanceM(p, r)))))
+    expect(maxOff).toBeLessThan(60)
+    expect(fixed.some((p) => distanceM(p, P(300)) < 5)).toBe(true)
+  })
+  it('沒有繞路就不動', () => {
+    const snapped = [P(0, 5), P(150, 8), P(300, 5), P(150, 3)]
+    expect(fixDetours(snapped, raw)).toEqual(snapped)
+  })
+})
+
+describe('貼齊道路繞路修正：彎路不算繞路', () => {
+  it('兩點之間的路本來就彎出去 80 m：保留貼齊的線', () => {
+    const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+    const raw = [P(0), P(300), P(600)]
+    const snapped = [P(0), P(100, 50), P(150, 80), P(200, 50), P(300), P(450, -70), P(600)]
+    expect(fixDetours(snapped, raw)).toEqual(snapped)
   })
 })

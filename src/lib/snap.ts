@@ -169,6 +169,89 @@ async function requestChunk(points: TrackPoint[], costing: string, fetcher: type
   }
 }
 
+// ── 繞路修正 ──
+
+/** 貼齊後的線離實際的點超過這麼遠（公尺）＝繞路 */
+export const DETOUR_M = 50
+/** 兩段繞路中間只隔這麼短（公尺）的正常線，就當成同一段繞路 */
+const DETOUR_GAP_M = 60
+
+/** 以 o 為原點的平面座標（公尺），短距離夠準 */
+function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
+  const k = Math.cos((o.lat * Math.PI) / 180)
+  return [((p.lng - o.lng) * Math.PI * 6371008.8 * k) / 180, ((p.lat - o.lat) * Math.PI * 6371008.8) / 180]
+}
+
+/** 點到折線的最近距離，和最近的位置（線段序號＋比例，用來排順序） */
+function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSeg = 0): { d: number; at: number } {
+  const [px, py] = toXY(o, p)
+  let best = { d: Infinity, at: minSeg }
+  for (let i = Math.max(0, minSeg); i < line.length - 1; i++) {
+    const [ax, ay] = line[i]
+    const [bx, by] = line[i + 1]
+    const dx = bx - ax
+    const dy = by - ay
+    const len2 = dx * dx + dy * dy
+    const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0
+    const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+    if (d < best.d) best = { d, at: i + t }
+  }
+  if (line.length === 1) best = { d: Math.hypot(px - line[0][0], py - line[0][1]), at: 0 }
+  return best
+}
+
+/**
+ * 貼齊道路有時會繞一圈：例如騎過頭在路中間迴轉，路線服務不允許路中迴轉，就繞街區一圈接回來。
+ * 貼齊後的線離實際的點超過 DETOUR_M 的那幾段，改成照實際的點畫（直線）。
+ */
+export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
+  if (snapped.length < 3 || raw.length < 2) return snapped
+  const o = raw[0]
+  const line = raw.map((p) => toXY(o, p))
+  const near = snapped.map((p) => nearestOnLine(o, line, p))
+  const off = near.map((n) => n.d > DETOUR_M)
+  if (!off.some(Boolean)) return snapped
+  // 找出繞路的範圍，中間只隔一小段正常線的併成一段
+  const runs: [number, number][] = []
+  for (let i = 0; i < off.length; i++) {
+    if (!off[i]) continue
+    let j = i
+    while (j + 1 < off.length && off[j + 1]) j++
+    const prev = runs[runs.length - 1]
+    if (prev) {
+      let gap = 0
+      for (let k = prev[1]; k < i; k++) gap += distanceM(snapped[k], snapped[k + 1])
+      if (gap <= DETOUR_GAP_M) {
+        prev[1] = j
+        i = j
+        continue
+      }
+    }
+    runs.push([i, j])
+    i = j
+  }
+  const out: GeoPoint[] = []
+  let k = 0
+  for (const [i, j] of runs) {
+    const a = Math.max(0, i - 1)
+    const b = Math.min(snapped.length - 1, j + 1)
+    // 繞路結束的點只往後找（騎過頭迴轉時去回同一條路，往前找會找到去程，漏掉迴轉的地方）
+    const from = near[a].at
+    const to = nearestOnLine(o, line, snapped[b], Math.floor(from) + 1).at
+    const mid: GeoPoint[] = []
+    if (to > from) for (let r = Math.floor(from) + 1; r <= Math.ceil(to) - 1 && r < raw.length; r++) mid.push(raw[r])
+    // 只有真的繞一大圈才改：貼齊的那段比照實際的點走長 1.5 倍又多 100 m 以上。
+    // 點跟點之間本來就是彎路（30 秒一點、騎車時相隔幾百公尺）那種偏離是對的，不能改成直線。
+    const snapLen = lengthM(snapped.slice(a, b + 1))
+    const rawLen = lengthM([snapped[a], ...mid, snapped[b]])
+    if (snapLen <= rawLen * 1.5 + 100) continue
+    out.push(...snapped.slice(k, a + 1), ...mid)
+    k = b
+  }
+  out.push(...snapped.slice(k))
+  return out
+}
+
 function lengthM(pts: GeoPoint[]): number {
   let m = 0
   for (let i = 1; i < pts.length; i++) m += distanceM(pts[i - 1], pts[i])
@@ -184,7 +267,7 @@ export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: t
   // snap2：改了比對方式（2026-11-21），以前失敗的結果要重試
   const key = `snap2.${mode}.${hashPoints(points)}`
   const hit = await getMeta<Cached>(key)
-  if (hit && 'pts' in hit) return hit.pts.map(([lat, lng]) => ({ lat, lng }))
+  if (hit && 'pts' in hit) return fixDetours(hit.pts.map(([lat, lng]) => ({ lat, lng })), points)
   if (hit && 'failAt' in hit && Date.now() - hit.failAt < RETRY_MS) return null
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return null
   try {
@@ -196,7 +279,7 @@ export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: t
     // 吸到很遠的路、繞一大圈＝比對錯了，用原本的線
     if (lengthM(out) > lengthM(points) * 2.5 + 500) throw new Error('貼齊後繞太遠')
     await setMeta(key, { pts: out.map((p) => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lng * 1e6) / 1e6]) } satisfies Cached)
-    return out
+    return fixDetours(out, points)
   } catch {
     await setMeta(key, { failAt: Date.now() } satisfies Cached)
     return null
