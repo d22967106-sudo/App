@@ -67,15 +67,35 @@ function maxSpeed(pts: TrackPoint[]): number {
   return max
 }
 
+/** 兩個停留的地方相距這麼遠（公尺）以上，中間是一段移動（各自都待滿 10 分鐘） */
+export const DISTINCT_STAYS_M = 60
+/** …而且從前一個停留到下一個停留，換算時速至少這麼快（慢慢飄移一小時 60 m 的不算） */
+export const DISTINCT_MIN_KMH = 0.5
+
+function distinctStays(from: Stay | null, to: Stay | null): boolean {
+  if (!from || !to) return false
+  const m = distanceM(from, to)
+  const h = Math.max(1, to.start - from.end) / 3600000
+  return m >= DISTINCT_STAYS_M && m / 1000 / h >= DISTINCT_MIN_KMH
+}
+
 /**
  * 短的段是真的走開了，還是停著時的飄移：
- * 有一個點離出發（或抵達）的地方夠遠——至少 60 m，而且超過那個點精確度的 1.5 倍——且有走路以上的速度。
+ * - 從一個停留走到另一個停留，兩地相距 60 m 以上、而且不是慢慢飄過去的＝真的移動（例如家 → 90 m 外的早餐店）
+ * - 否則（走出去又回到同一個地方、或還在路上）：有一個點離出發／抵達的地方至少 60 m、而且超過那個點精確度的 1.5 倍，
+ *   且有走路以上的速度
  */
 function reallyMoved(raw: TrackPoint[], from: Stay | null, to: Stay | null, maxKmh: number): boolean {
+  if (distinctStays(from, to)) return true
   if (maxKmh < SHORT_LEG_MIN_KMH) return false
   const anchors: GeoPoint[] = [from, to].filter((s): s is Stay => !!s)
   if (!anchors.length && raw.length) anchors.push(raw[0])
   return raw.some((p) => anchors.every((a) => distanceM(a, p) >= Math.max(60, (p.accuracy ?? 0) * 1.5)))
+}
+
+/** 停留的中心當成一個點（移動段從上一個停留的中心畫到下一個停留的中心） */
+function stayPoint(s: Stay, time: number, date: string): TrackPoint {
+  return { id: `${s.id}-c${time}`, time, date, lat: s.lat, lng: s.lng, source: 'auto' }
 }
 
 export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
@@ -96,10 +116,15 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
   const legs: Leg[] = []
   for (const g of gaps) {
     const raw = pts.filter((p) => p.time >= g.t0 && p.time <= g.t1)
-    const seg = cleanPath(raw, LEG_MAX_STEP_M, 15)
+    // 停留的範圍常常把走路中的點也吃進去（停留半徑 50 m 起跳），短距離走路中間會只剩一兩個點，
+    // 所以頭尾接上停留的中心：從哪裡出發、到了哪裡，線一定接得起來
+    const date = raw[0]?.date ?? pts[0].date
+    const withEnds = [...(g.from ? [stayPoint(g.from, g.t0, date)] : []), ...raw.filter((p) => !(g.from && p.time === g.t0) && !(g.to && p.time === g.t1)), ...(g.to ? [stayPoint(g.to, g.t1, date)] : [])]
+    const seg = cleanPath(withEnds, LEG_MAX_STEP_M, 15)
     if (seg.length < 2) continue
     const km = pathKm(seg)
-    if (km * 1000 < MIN_LEG_M) continue
+    const distinct = distinctStays(g.from, g.to)
+    if (km * 1000 < MIN_LEG_M && !distinct) continue
     if (km * 1000 < SHORT_LEG_M && !reallyMoved(raw, g.from, g.to, maxSpeed(seg))) continue
     const hours = (seg[seg.length - 1].time - seg[0].time) / 3600000
     legs.push({
@@ -117,10 +142,16 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
   return legs
 }
 
+/** 最快也不超過這個時速＝走路（點少的短段平均時速會被誤差灌高，例如兩點 34 秒 80 m 算成 8.6 km/h） */
+export const WALK_TOP_KMH = 12
+/** 平均很慢但最快超過這個＝騎車中間有等（停紅燈、到了還沒算停留），不是走路 */
+export const RIDE_MIN_TOP_KMH = 25
+
 /** 依速度猜交通方式：很慢＝走路；很快＝火車／高鐵（不貼齊）；其他＝預設 */
 export function guessMode(leg: Pick<Leg, 'avgKmh' | 'maxKmh'>, fallback: TravelMode): TravelMode {
   if (leg.maxKmh > RAIL_MIN_KMH) return 'none'
-  if (leg.avgKmh < WALK_MAX_KMH) return 'walk'
+  if (leg.maxKmh < WALK_TOP_KMH) return 'walk'
+  if (leg.avgKmh < WALK_MAX_KMH && leg.maxKmh < RIDE_MIN_TOP_KMH) return 'walk'
   return fallback
 }
 
