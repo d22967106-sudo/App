@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-19.1
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-21.1
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -142,8 +142,45 @@ function stillCard(stack, size, name, hasRoute) {
   card.addSpacer()
 }
 
-/** 今天路線縮圖 */
-function routeImage(route, size) {
+// ── 路線縮圖的底圖：OpenStreetMap 圖磚（跟 App 的「OSM 奶茶」一樣，再蓋一層奶茶色） ──
+const TILE_URL = 'https://tile.openstreetmap.org'
+/** 圖磚存在手機上幾天（同一塊不重複下載，OSM 圖磚使用規範要求快取） */
+const TILE_KEEP_DAYS = 14
+/** 1 個圖磚像素畫成幾個小工具點（0.5＝256 px 的圖磚畫成 128 點，在 3 倍螢幕上清楚） */
+const TILE_PT = 0.5
+
+/** 經緯度 → 第 z 層的世界像素座標（Web Mercator，圖磚 256 px） */
+function worldPx(lat, lng, z) {
+  const n = 256 * 2 ** z
+  const s = Math.sin(toRad(Math.max(-85, Math.min(85, lat))))
+  return { x: ((lng + 180) / 360) * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n }
+}
+
+async function loadTile(z, x, y) {
+  const fm = FileManager.local()
+  const dir = fm.joinPath(fm.cacheDirectory(), 'ledger-tiles')
+  if (!fm.fileExists(dir)) fm.createDirectory(dir, true)
+  const file = fm.joinPath(dir, `${z}-${x}-${y}.png`)
+  if (fm.fileExists(file) && Date.now() - fm.modificationDate(file).getTime() < TILE_KEEP_DAYS * 86400000) {
+    const img = fm.readImage(file)
+    if (img) return img
+  }
+  try {
+    const req = new Request(`${TILE_URL}/${z}/${x}/${y}.png`)
+    req.headers = { 'User-Agent': 'KoukouLedgerWidget/1.0 (personal Scriptable widget)' }
+    req.timeoutInterval = 10
+    const img = await req.loadImage()
+    if (req.response.statusCode !== 200) throw new Error(String(req.response.statusCode))
+    fm.writeImage(file, img)
+    return img
+  } catch {
+    // 沒網路：用舊的也好
+    return fm.fileExists(file) ? fm.readImage(file) : null
+  }
+}
+
+/** 今天路線縮圖（有地圖底圖；圖磚載不到就只畫路線） */
+async function routeImage(route, size) {
   const dc = new DrawContext()
   dc.size = new Size(size, size)
   dc.respectScreenScale = true
@@ -160,24 +197,50 @@ function routeImage(route, size) {
     dc.drawTextInRect('今天還沒有軌跡', new Rect(0, size / 2 - 8, size, 20))
     return dc.getImage()
   }
-  const lats = route.map((p) => p[0])
-  const lngs = route.map((p) => p[1])
-  const midLat = (Math.min(...lats) + Math.max(...lats)) / 2
-  const k = Math.cos((midLat * Math.PI) / 180) // 經度要乘 cos(緯度) 才不會變形
-  const xs = lngs.map((l) => l * k)
-  const minX = Math.min(...xs)
-  const maxX = Math.max(...xs)
-  const minY = Math.min(...lats)
-  const maxY = Math.max(...lats)
-  const span = Math.max(maxX - minX, maxY - minY, 0.002)
   const m = 16
-  const scale = (size - m * 2) / span
-  const ox = (size - (maxX - minX) * scale) / 2
-  const oy = (size - (maxY - minY) * scale) / 2
-  const pts = route.map((p, i) => new Point(ox + (xs[i] - minX) * scale, size - (oy + (p[0] - minY) * scale)))
+  // 找最大的縮放層級，讓整條路線放得進去（最多 17，太近看不出在哪）
+  let z = 17
+  let px
+  for (; z >= 3; z--) {
+    px = route.map((p) => worldPx(p[0], p[1], z))
+    const w = Math.max(...px.map((q) => q.x)) - Math.min(...px.map((q) => q.x))
+    const h = Math.max(...px.map((q) => q.y)) - Math.min(...px.map((q) => q.y))
+    if (Math.max(w, h) * TILE_PT <= size - m * 2) break
+  }
+  const cx = (Math.max(...px.map((q) => q.x)) + Math.min(...px.map((q) => q.x))) / 2
+  const cy = (Math.max(...px.map((q) => q.y)) + Math.min(...px.map((q) => q.y))) / 2
+  const half = size / TILE_PT / 2
+  const left = cx - half
+  const top = cy - half
+  const toPt = (q) => new Point((q.x - left) * TILE_PT, (q.y - top) * TILE_PT)
+
+  // 底圖
+  let tiles = 0
+  const n = 2 ** z
+  for (let ty = Math.floor(top / 256); ty <= Math.floor((top + half * 2) / 256); ty++) {
+    for (let tx = Math.floor(left / 256); tx <= Math.floor((left + half * 2) / 256); tx++) {
+      if (ty < 0 || ty >= n) continue
+      const img = await loadTile(z, ((tx % n) + n) % n, ty)
+      if (!img) continue
+      dc.drawImageInRect(img, new Rect((tx * 256 - left) * TILE_PT, (ty * 256 - top) * TILE_PT, 256 * TILE_PT, 256 * TILE_PT))
+      tiles++
+    }
+  }
+  if (tiles) {
+    // 奶茶色濾鏡（DrawContext 沒有 multiply，用半透明色蓋一層）
+    dc.setFillColor(new Color('#E9D3B8', 0.42))
+    dc.fillRect(new Rect(0, 0, size, size))
+  }
+
+  const pts = px.map(toPt)
   if (pts.length > 1) {
     const path = new Path()
     path.addLines(pts)
+    // 白邊讓線在地圖上看得清楚
+    dc.addPath(path)
+    dc.setStrokeColor(Color.white())
+    dc.setLineWidth(6)
+    dc.strokePath()
     dc.addPath(path)
     dc.setStrokeColor(C.primary)
     dc.setLineWidth(3)
@@ -187,9 +250,16 @@ function routeImage(route, size) {
     dc.setFillColor(color)
     dc.fillEllipse(new Rect(pt.x - r, pt.y - r, r * 2, r * 2))
   }
+  dot(pts[0], Color.white(), 5.5)
   dot(pts[0], C.dark, 4)
   dot(pts[pts.length - 1], Color.white(), 5)
   dot(pts[pts.length - 1], C.primary, 3.5)
+  if (tiles) {
+    dc.setTextColor(new Color('#3A2618', 0.7))
+    dc.setFont(Font.systemFont(7))
+    dc.setTextAlignedRight()
+    dc.drawTextInRect('© OpenStreetMap', new Rect(0, size - 11, size - 6, 10))
+  }
   return dc.getImage()
 }
 
@@ -234,7 +304,7 @@ async function mediumWidget(d, stale) {
   if (stale) text(left, '（離線，顯示上次資料）', 9, C.sub)
   row.addSpacer()
   if (moved(d.route)) {
-    const img = row.addImage(routeImage(d.route, 120))
+    const img = row.addImage(await routeImage(d.route, 120))
     img.imageSize = new Size(120, 120)
     img.cornerRadius = 14
   } else {
