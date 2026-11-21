@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
 import { carryPoint, computeLegs, guessMode, withCarry } from './legs'
-import { decodePolyline, encodePolyline, snapLeg } from './snap'
+import { decodePolyline, encodePolyline, snapLeg, thin } from './snap'
 import type { TrackPoint } from './types'
 
 const home = { lat: 23.48, lng: 120.45 }
@@ -115,6 +115,25 @@ describe('貼齊道路', () => {
     const bad = (async () => new Response('{"error":"no suitable edges"}', { status: 400 })) as unknown as typeof fetch
     expect(await snapLeg(pts.slice(0, 8), 'walk', bad)).toBeNull()
   }, 10000)
+
+  it('走路點稀疏、誤差大：比對時告訴 Valhalla 精確度；比對失敗就沿道路規劃路線串起來', async () => {
+    const walk = [0, 1, 2, 3, 4].map((k) => at('2026-11-23', `09:0${k}`, lerp(home, { lat: home.lat, lng: home.lng - 0.0015 }, k / 4), 50))
+    const urls: string[] = []
+    const line = [home, { lat: home.lat, lng: home.lng - 0.0015 }]
+    const fake = (async (url: string) => {
+      urls.push(decodeURIComponent(url))
+      if (url.includes('/trace_route')) return new Response('{"error":"Map Match algorithm failed"}', { status: 400 })
+      return new Response(JSON.stringify({ trip: { legs: [{ shape: encodePolyline(line) }] } }))
+    }) as unknown as typeof fetch
+    const r = await snapLeg(walk, 'walk', fake)
+    expect(r).toHaveLength(2)
+    expect(urls[0]).toContain('"gps_accuracy":50')
+    expect(urls[0]).toContain('"search_radius":75')
+    expect(urls[0]).toContain('"turn_penalty_factor":500')
+    expect(urls[1].startsWith('https://valhalla1.openstreetmap.de/route?json=')).toBe(true)
+    expect(urls[1]).toContain('"costing":"pedestrian"')
+    expect(urls[1]).toContain('"type":"via"')
+  }, 10000)
 })
 
 describe('短距離走路（2026-11-21 使用者回報走路沒畫出來）', () => {
@@ -157,5 +176,15 @@ describe('短距離走路（2026-11-21 使用者回報走路沒畫出來）', ()
     const stays = dayStays(track)
     expect(stays).toHaveLength(1)
     expect(computeLegs(track, stays)).toEqual([])
+  })
+})
+
+describe('挑點', () => {
+  it('平均挑、留頭尾', () => {
+    expect(thin([1, 2, 3], 5)).toEqual([1, 2, 3])
+    const t = thin(Array.from({ length: 100 }, (_, i) => i), 20)
+    expect(t).toHaveLength(20)
+    expect(t[0]).toBe(0)
+    expect(t[19]).toBe(99)
   })
 })

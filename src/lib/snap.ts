@@ -9,7 +9,7 @@ import type { GeoPoint, TrackPoint } from './types'
  * 結果存在手機上（同樣的點不再重算）；失敗就回傳 null，畫面上改用原本的直線。
  */
 
-const VALHALLA = 'https://valhalla1.openstreetmap.de/trace_route'
+const VALHALLA_BASE = 'https://valhalla1.openstreetmap.de'
 
 const COSTING: Record<Exclude<TravelMode, 'none'>, string> = {
   scooter: 'motor_scooter',
@@ -95,14 +95,78 @@ function hashPoints(points: TrackPoint[]): string {
 
 type Cached = { pts: [number, number][] } | { failAt: number }
 
-async function requestChunk(points: GeoPoint[], costing: string, fetcher: typeof fetch): Promise<GeoPoint[]> {
-  const body = { encoded_polyline: encodePolyline(points), costing, shape_match: 'map_snap' }
-  const res = await throttled(() => fetcher(`${VALHALLA}?json=${encodeURIComponent(JSON.stringify(body))}`))
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+
+function medianAccuracy(points: TrackPoint[]): number {
+  const a = points.map((p) => p.accuracy).filter((x): x is number => x != null).sort((x, y) => x - y)
+  return a.length ? a[Math.floor(a.length / 2)] : 20
+}
+
+async function valhalla(endpoint: 'trace_route' | 'route', body: unknown, fetcher: typeof fetch): Promise<GeoPoint[]> {
+  const res = await throttled(() => fetcher(`${VALHALLA_BASE}/${endpoint}?json=${encodeURIComponent(JSON.stringify(body))}`))
   if (!res.ok) throw new Error(`Valhalla ${res.status}`)
   const data = (await res.json()) as { trip?: { legs?: { shape: string }[] } }
   const legs = data.trip?.legs ?? []
   if (!legs.length) throw new Error('Valhalla 沒有回傳路線')
-  return legs.flatMap((l) => decodePolyline(l.shape))
+  return legs.flatMap((l, i) => {
+    const pts = decodePolyline(l.shape)
+    return i ? pts.slice(1) : pts
+  })
+}
+
+/**
+ * 比對（map matching）：把點的實際精確度告訴 Valhalla（預設以為 GPS 很準，±30～65 m 的走路點常常比對失敗），
+ * 也附上每點的時間間隔。官方文件：點最好 1～10 秒一個、search_radius 最大 100 m；走路來回抖可以加 turn_penalty_factor 500。
+ */
+async function traceChunk(points: TrackPoint[], costing: string, fetcher: typeof fetch): Promise<GeoPoint[]> {
+  const acc = medianAccuracy(points)
+  const trace_options: Record<string, number> = {
+    gps_accuracy: clamp(Math.round(acc), 5, 100),
+    search_radius: clamp(Math.round(acc * 1.5), 30, 100),
+  }
+  if (costing === 'pedestrian' && acc > 20) trace_options.turn_penalty_factor = 500
+  const body = {
+    encoded_polyline: encodePolyline(points),
+    costing,
+    shape_match: 'map_snap',
+    begin_time: Math.round(points[0].time / 1000),
+    durations: points.slice(1).map((p, i) => Math.max(0, Math.round((p.time - points[i].time) / 1000))),
+    trace_options,
+  }
+  return valhalla('trace_route', body, fetcher)
+}
+
+/** 規劃路線時最多用幾個點（Valhalla 公共伺服器的地點數有上限，保守用 20） */
+const ROUTE_MAX_LOCATIONS = 20
+
+/** 平均挑出最多 n 個點（一定留頭尾） */
+export function thin<T>(points: T[], n: number): T[] {
+  if (points.length <= n) return points
+  const out: T[] = []
+  for (let k = 0; k < n; k++) out.push(points[Math.round((k * (points.length - 1)) / (n - 1))])
+  return out
+}
+
+/**
+ * 比對失敗時的備案：把點當成「途經點」沿著道路規劃路線（點很稀疏、誤差大時比對做不到，規劃路線可以）。
+ * 中間的點用 via（可以迴轉、不分段），走去巷口再走回來也畫得出來。
+ */
+async function routeThrough(points: TrackPoint[], costing: string, fetcher: typeof fetch): Promise<GeoPoint[]> {
+  const pick = thin(points, ROUTE_MAX_LOCATIONS)
+  const locations = pick.map((p, i) => ({
+    lat: Math.round(p.lat * 1e6) / 1e6,
+    lon: Math.round(p.lng * 1e6) / 1e6,
+    type: i === 0 || i === pick.length - 1 ? 'break' : 'via',
+  }))
+  return valhalla('route', { locations, costing }, fetcher)
+}
+
+async function requestChunk(points: TrackPoint[], costing: string, fetcher: typeof fetch): Promise<GeoPoint[]> {
+  try {
+    return await traceChunk(points, costing, fetcher)
+  } catch {
+    return await routeThrough(points, costing, fetcher)
+  }
 }
 
 function lengthM(pts: GeoPoint[]): number {
@@ -117,7 +181,8 @@ function lengthM(pts: GeoPoint[]): number {
  */
 export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: typeof fetch = fetch): Promise<GeoPoint[] | null> {
   if (mode === 'none' || points.length < 2) return null
-  const key = `snap.${mode}.${hashPoints(points)}`
+  // snap2：改了比對方式（2026-11-21），以前失敗的結果要重試
+  const key = `snap2.${mode}.${hashPoints(points)}`
   const hit = await getMeta<Cached>(key)
   if (hit && 'pts' in hit) return hit.pts.map(([lat, lng]) => ({ lat, lng }))
   if (hit && 'failAt' in hit && Date.now() - hit.failAt < RETRY_MS) return null

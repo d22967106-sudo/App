@@ -232,6 +232,11 @@
        - 測試加 3 項（巷口來回 150 m 停 3 分鐘＝一段走路；在家 ±65 m 飄移不算出門；單一點飄到 70 m 外不切成兩段），全部 119 項。
        - 待使用者實測：短距離走路有沒有出現；在家有沒有冒出假的「移動」段。
        - 2026-11-21 經使用者同意 fast-forward 合併到預設分支 `claude/confident-babbage-8nlxkb`，GitHub Actions 發布成功。使用者用 11/21 早上的軌跡實測（App 打開時用手機上的點重算，不用重新收資料）。
+     - 使用者實測（11/21）：走路段出現了，但**只有點到點的直線，沒有貼齊道路**。原因（Valhalla 官方文件，從 GitHub 原始碼 docs/docs/api 讀）：map matching 要 1～10 秒一點，Overland 是 30 秒一點、走路點又 ±30～65 m，而我們沒給精確度（Valhalla 預設當成很準），比對失敗就畫直線。改法（`snap.ts`）：
+       - trace_route 加 `trace_options`：`gps_accuracy`＝點的精確度中位數（5～100）、`search_radius`＝1.5 倍（30～100，文件說最大 100）、走路且精確度 > 20 m 時 `turn_penalty_factor: 500`（文件建議減少走路來回抖）；另附 `begin_time`／`durations`。
+       - 比對失敗的備案：`/route` 把點（最多 20 個，`thin` 平均挑、留頭尾）當途經點沿道路規劃；中間點用 `via`（可迴轉、不分段，走去巷口再走回來畫得出來）。結果一樣要通過「不比原本長 2.5 倍以上」的檢查。
+       - 快取 key 改 `snap2.`，以前失敗記錄的段會重試。
+       - 開發環境連不到 Valhalla，只用假伺服器測（加 2 項，全部 121 項）。待使用者實測。
   - 耗電（第 2 點）使用者目標：**一天 10% 以下、而且不影響程式運作**（短距離走路還要抓得到）。Overland 的 Auto-Stop 是 2026-10-29 才加進原始碼（在 1.4 版號之後），App Store 版本有沒有還不確定（開發環境連不到 apps.apple.com）。待討論。
   2. **Overland 21 小時耗電 14%**（11/19 量到的是背景 21 時 18 分占 7%）。Overland 官網（overland.p3k.app）在開發環境連不到，改看 GitHub 原始碼（aaronpk/Overland-iOS，1.4 版，2026-11-12）：「Standard」模式＋不暫停＝整天開著定位，連在家睡覺也是，這是主要耗電來源；Min Distance／Min Time／Discard points while stationary 只是丟掉點、不會關定位，不省電。新版有 **Auto-Stop Radius／Auto-Stop After**（在半徑內待滿設定時間就關掉定位，靠「重大位置變更」或 Resume with Geofence 的圍欄離開時再開），這是省電的正解，但代價是離開時要走出圍欄（最小 100 m，iOS 圍欄偵測常常更晚）才恢復，**短距離走路會更容易漏掉**，和問題 1 互相衝突，要使用者選。App Store 上的版本有沒有 Auto-Stop 還沒確認（請使用者看設定頁有沒有這兩項）。
 - 掃發票先不做；停留提醒、軌跡精簡不做（見上）。
