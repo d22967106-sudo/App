@@ -25,8 +25,14 @@ export function modeName(m: TravelMode): string {
 export const WALK_MAX_KMH = 7
 /** 最高時速超過這個＝搭火車／高鐵或走國道，不貼齊 */
 export const RAIL_MIN_KMH = 90
-/** 移動距離少於這個（公尺）不算一段（停著時的飄移） */
-export const MIN_LEG_M = 200
+/** 移動距離少於這個（公尺）不算一段 */
+export const MIN_LEG_M = 80
+/** 少於這個距離的段要通過「真的有走開」的檢查（以前一律不算，短距離走路會不見） */
+export const SHORT_LEG_M = 200
+/** 短的段：最快時速至少要這麼快（走路約 4 km/h；停著時的飄移通常更慢） */
+export const SHORT_LEG_MIN_KMH = 2.5
+/** 切好的段裡，點和點之間的飄移門檻最多這麼多公尺 */
+export const LEG_MAX_STEP_M = 40
 
 export interface Leg {
   /** 用出發時間當 id，同一天重算也不會變（存手動選的交通方式用） */
@@ -61,6 +67,17 @@ function maxSpeed(pts: TrackPoint[]): number {
   return max
 }
 
+/**
+ * 短的段是真的走開了，還是停著時的飄移：
+ * 有一個點離出發（或抵達）的地方夠遠——至少 60 m，而且超過那個點精確度的 1.5 倍——且有走路以上的速度。
+ */
+function reallyMoved(raw: TrackPoint[], from: Stay | null, to: Stay | null, maxKmh: number): boolean {
+  if (maxKmh < SHORT_LEG_MIN_KMH) return false
+  const anchors: GeoPoint[] = [from, to].filter((s): s is Stay => !!s)
+  if (!anchors.length && raw.length) anchors.push(raw[0])
+  return raw.some((p) => anchors.every((a) => distanceM(a, p) >= Math.max(60, (p.accuracy ?? 0) * 1.5)))
+}
+
 export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
   const pts = usableAutoPoints(track)
   if (pts.length < 2) return []
@@ -78,10 +95,12 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
 
   const legs: Leg[] = []
   for (const g of gaps) {
-    const seg = cleanPath(pts.filter((p) => p.time >= g.t0 && p.time <= g.t1))
+    const raw = pts.filter((p) => p.time >= g.t0 && p.time <= g.t1)
+    const seg = cleanPath(raw, LEG_MAX_STEP_M, 15)
     if (seg.length < 2) continue
     const km = pathKm(seg)
     if (km * 1000 < MIN_LEG_M) continue
+    if (km * 1000 < SHORT_LEG_M && !reallyMoved(raw, g.from, g.to, maxSpeed(seg))) continue
     const hours = (seg[seg.length - 1].time - seg[0].time) / 3600000
     legs.push({
       id: `leg-${seg[0].time}`,

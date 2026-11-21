@@ -116,3 +116,46 @@ describe('貼齊道路', () => {
     expect(await snapLeg(pts.slice(0, 8), 'walk', bad)).toBeNull()
   }, 10000)
 })
+
+describe('短距離走路（2026-11-21 使用者回報走路沒畫出來）', () => {
+  const D = '2026-11-22'
+  const t0 = new Date(2026, 10, 22, 9, 0).getTime()
+  // 往西走 lng 每 0.0001 度約 10 公尺
+  const pt = (sec: number, dx: number, accuracy = 10, dy = 0): TrackPoint => ({
+    id: `w${sec}`, time: t0 + sec * 1000, date: D, lat: home.lat + dy * 0.00009, lng: home.lng - dx * 0.0000098, accuracy, source: 'auto',
+  })
+  const atHome = (fromSec: number, toSec: number, accuracy = 10) => {
+    const out: TrackPoint[] = []
+    for (let s = fromSec; s <= toSec; s += 300) out.push(pt(s, (s / 300) % 2 ? 4 : 0, accuracy))
+    return out
+  }
+
+  it('走到 150 公尺外的巷口買東西（停 3 分鐘）再走回家：算一段走路', () => {
+    const walk: TrackPoint[] = []
+    // 30 秒一點，時速約 4.3 km/h（每點 36 m）
+    for (let k = 1; k <= 4; k++) walk.push(pt(1800 + k * 30, k * 36))
+    walk.push(pt(1800 + 150 + 180, 150))
+    for (let k = 1; k <= 4; k++) walk.push(pt(1800 + 330 + k * 30, 150 - k * 36))
+    const track = [...atHome(0, 1800), ...walk, ...atHome(2400, 5400)]
+    const stays = dayStays(track)
+    expect(stays).toHaveLength(2)
+    const legs = computeLegs(track, stays)
+    expect(legs).toHaveLength(1)
+    expect(legs[0].km).toBeGreaterThanOrEqual(0.2)
+    expect(guessMode(legs[0], 'scooter')).toBe('walk')
+  })
+
+  it('在家用 Wi-Fi 定位（±65 m）飄來飄去：不算出門', () => {
+    const drift = [0, 60, -40, 70, 20, -60, 50, 0, 80, -30, 40, 0].map((dx, i) => pt(i * 600, dx, 65, (i % 3) - 1))
+    const stays = dayStays(drift)
+    expect(stays).toHaveLength(1)
+    expect(computeLegs(drift, stays)).toEqual([])
+  })
+
+  it('在家時一個點飄到 70 公尺外：不會切成兩段停留', () => {
+    const track = [...atHome(0, 1800), pt(1830, 70, 20), ...atHome(2100, 4200)]
+    const stays = dayStays(track)
+    expect(stays).toHaveLength(1)
+    expect(computeLegs(track, stays)).toEqual([])
+  })
+})
