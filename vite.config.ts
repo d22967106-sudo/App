@@ -9,7 +9,8 @@ export default defineConfig({
   base,
   worker: { format: 'es' },
   define: {
-    __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    // 台灣時間到分鐘，設定頁底部顯示，用來確認手機上已經換成新版
+    __BUILD_DATE__: JSON.stringify(new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 16).replace('T', ' ')),
   },
   plugins: [
     react(),
