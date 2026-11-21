@@ -216,3 +216,18 @@ describe('貼齊道路繞路修正：彎路不算繞路', () => {
     expect(fixDetours(snapped, raw)).toEqual(snapped)
   })
 })
+
+describe('貼齊道路繞路修正：實際那次的小街區（約 47 × 55 m）', () => {
+  it('迴轉處繞了一個小街區、那裡沒有任何點：改回原路折返', () => {
+    const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+    // 往南騎到 0 → 80 m 處一群點（目的地附近）→ 160 m 迴轉 → 回到 80 m
+    const raw = [P(0), P(40), P(80), P(85, 3), P(160), P(80), P(78, 2), P(82)]
+    // 貼齊：往南到 105 m（公園路口）→ 東 47 → 南 55 → 西 47（160 m，中華路口）→ 北回 80 m
+    const snapped = [P(0), P(40), P(80), P(105), P(105, 47), P(160, 47), P(160), P(130), P(105), P(80)]
+    const fixed = fixDetours(snapped, raw)
+    const maxOff = Math.max(...fixed.map((p) => Math.min(...raw.map((r) => distanceM(p, r)))))
+    expect(fixed.every((p) => Math.abs(p.lng - home.lng) / 0.0000098 < 10)).toBe(true) // 沒有偏到東邊的街區
+    expect(fixed.some((p) => distanceM(p, P(160)) < 5)).toBe(true) // 迴轉的地方還在
+    void maxOff
+  })
+})

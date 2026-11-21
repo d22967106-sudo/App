@@ -281,7 +281,12 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       const t = new Date(p.time)
       return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.accuracy ?? ''}`
     })
-    const text = [`摳摳手帳原始定位點 ${date}（時間,緯度,經度,精確度m）共 ${pts.length} 點`, ...lines].join('\n')
+    // 各段畫在地圖上的線（貼齊道路後的結果），除錯貼齊用
+    const legLines = legs.map((l, i) => {
+      const line = legLine(l)
+      return [`# 第 ${i + 1} 段 ${formatTime(l.start)}–${formatTime(l.end)} ${modeName(modeOf(l).mode)} 畫出的線 ${line.length} 點`, line.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(' ')].join('\n')
+    })
+    const text = [`摳摳手帳原始定位點 ${date}（時間,緯度,經度,精確度m）共 ${pts.length} 點`, ...lines, ...legLines].join('\n')
     try {
       await navigator.clipboard.writeText(text)
       toast(`已複製 ${pts.length} 個點`)

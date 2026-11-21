@@ -172,9 +172,9 @@ async function requestChunk(points: TrackPoint[], costing: string, fetcher: type
 // ── 繞路修正 ──
 
 /** 貼齊後的線離實際的點超過這麼遠（公尺）＝繞路 */
-export const DETOUR_M = 50
+export const DETOUR_M = 25
 /** 兩段繞路中間只隔這麼短（公尺）的正常線，就當成同一段繞路 */
-const DETOUR_GAP_M = 60
+const DETOUR_GAP_M = 30
 
 /** 以 o 為原點的平面座標（公尺），短距離夠準 */
 function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
@@ -182,10 +182,17 @@ function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
   return [((p.lng - o.lng) * Math.PI * 6371008.8 * k) / 180, ((p.lat - o.lat) * Math.PI * 6371008.8) / 180]
 }
 
-/** 點到折線的最近距離，和最近的位置（線段序號＋比例，用來排順序） */
+/** 去程、回程疊在同一條路上時，距離差不到這麼多（公尺）就算在較早的那段 */
+const SAME_ROAD_M = 10
+
+/**
+ * 點到折線的最近距離，和最近的位置（線段序號＋比例，用來排順序）。
+ * 只從 minSeg 段往後找；幾段差不多近（例如迴轉時去回同一條路）就取最早的那段。
+ */
 function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSeg = 0): { d: number; at: number } {
   const [px, py] = toXY(o, p)
-  let best = { d: Infinity, at: minSeg }
+  if (line.length === 1) return { d: Math.hypot(px - line[0][0], py - line[0][1]), at: 0 }
+  const cands: { d: number; at: number }[] = []
   for (let i = Math.max(0, minSeg); i < line.length - 1; i++) {
     const [ax, ay] = line[i]
     const [bx, by] = line[i + 1]
@@ -193,11 +200,11 @@ function nearestOnLine(o: GeoPoint, line: [number, number][], p: GeoPoint, minSe
     const dy = by - ay
     const len2 = dx * dx + dy * dy
     const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0
-    const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-    if (d < best.d) best = { d, at: i + t }
+    cands.push({ d: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), at: i + t })
   }
-  if (line.length === 1) best = { d: Math.hypot(px - line[0][0], py - line[0][1]), at: 0 }
-  return best
+  if (!cands.length) return { d: Infinity, at: minSeg }
+  const min = Math.min(...cands.map((c) => c.d))
+  return cands.find((c) => c.d <= min + SAME_ROAD_M)!
 }
 
 /**
@@ -208,7 +215,13 @@ export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
   if (snapped.length < 3 || raw.length < 2) return snapped
   const o = raw[0]
   const line = raw.map((p) => toXY(o, p))
-  const near = snapped.map((p) => nearestOnLine(o, line, p))
+  // 沿著實際的路線依序對：每個貼齊的點只往後找（離太遠的點不推進位置）
+  let minSeg = 0
+  const near = snapped.map((p) => {
+    const n = nearestOnLine(o, line, p, minSeg)
+    if (n.d <= DETOUR_M) minSeg = Math.floor(n.at)
+    return n
+  })
   const off = near.map((n) => n.d > DETOUR_M)
   if (!off.some(Boolean)) return snapped
   // 找出繞路的範圍，中間只隔一小段正常線的併成一段
@@ -235,16 +248,16 @@ export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
   for (const [i, j] of runs) {
     const a = Math.max(0, i - 1)
     const b = Math.min(snapped.length - 1, j + 1)
-    // 繞路結束的點只往後找（騎過頭迴轉時去回同一條路，往前找會找到去程，漏掉迴轉的地方）
     const from = near[a].at
-    const to = nearestOnLine(o, line, snapped[b], Math.floor(from) + 1).at
+    const to = near[b].at
     const mid: GeoPoint[] = []
     if (to > from) for (let r = Math.floor(from) + 1; r <= Math.ceil(to) - 1 && r < raw.length; r++) mid.push(raw[r])
-    // 只有真的繞一大圈才改：貼齊的那段比照實際的點走長 1.5 倍又多 100 m 以上。
+    // 只有真的繞一圈才改：貼齊的那段比照實際的點走長 1.5 倍又多 40 m 以上
+    // （2026-11-21 實際的例子：迴轉處繞了一個約 50 × 55 m 的小街區）。
     // 點跟點之間本來就是彎路（30 秒一點、騎車時相隔幾百公尺）那種偏離是對的，不能改成直線。
     const snapLen = lengthM(snapped.slice(a, b + 1))
     const rawLen = lengthM([snapped[a], ...mid, snapped[b]])
-    if (snapLen <= rawLen * 1.5 + 100) continue
+    if (snapLen <= rawLen * 1.5 + 40) continue
     out.push(...snapped.slice(k, a + 1), ...mid)
     k = b
   }
