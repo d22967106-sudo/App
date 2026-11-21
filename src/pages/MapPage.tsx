@@ -274,6 +274,22 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       })
   }, [routeSettings.rawPoints, rawTrack])
 
+  const copyRawPoints = async () => {
+    const pts = (rawTrack ?? []).filter(isAuto).sort((a, b) => a.time - b.time)
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const lines = pts.map((p) => {
+      const t = new Date(p.time)
+      return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.accuracy ?? ''}`
+    })
+    const text = [`摳摳手帳原始定位點 ${date}（時間,緯度,經度,精確度m）共 ${pts.length} 點`, ...lines].join('\n')
+    try {
+      await navigator.clipboard.writeText(text)
+      toast(`已複製 ${pts.length} 個點`)
+    } catch {
+      toast('複製失敗，請再按一次', 3000)
+    }
+  }
+
   // ── 播放當天行程 ──
   const [playhead, setPlayhead] = useState<GeoPoint | null>(null)
   const playRaf = useRef<number | null>(null)
@@ -491,6 +507,11 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           </div>
         </div>
         <div className="sheet-body" ref={listRef}>
+          {routeSettings.rawPoints && rawTrack && rawTrack.some(isAuto) && (
+            <button type="button" className="btn-outline" style={{ margin: '8px 16px', width: 'calc(100% - 32px)' }} onClick={copyRawPoints}>
+              複製這天的原始定位點（貼給開發者除錯）
+            </button>
+          )}
           {loaded && items.length === 0 && (
             <div className="sheet-empty">
               {isToday ? '今天還沒有紀錄，按右邊的 + 記一筆' : '這天沒有紀錄'}
