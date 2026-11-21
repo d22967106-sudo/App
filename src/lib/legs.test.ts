@@ -1,9 +1,23 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
-import { carryPoint, computeLegs, guessMode, withCarry } from './legs'
+import { carryPoint, computeLegs, dropWobble, guessMode, withCarry } from './legs'
 import { decodePolyline, encodePolyline, snapLeg, thin, tidySnapped } from './snap'
+import { distanceM } from './geo'
 import type { TrackPoint } from './types'
+
+/** 點離折線多近（公尺，每段切 20 份取樣，測試用） */
+function distToLine(line: { lat: number; lng: number }[], p: { lat: number; lng: number }): number {
+  let best = Infinity
+  for (let i = 0; i < line.length - 1; i++)
+    for (let k = 0; k <= 20; k++) {
+      const q = { lat: line[i].lat + ((line[i + 1].lat - line[i].lat) * k) / 20, lng: line[i].lng + ((line[i + 1].lng - line[i].lng) * k) / 20 }
+      best = Math.min(best, distanceM(q, p))
+    }
+  if (line.length === 1) best = distanceM(line[0], p)
+  return best
+}
+
 
 const home = { lat: 23.48, lng: 120.45 }
 const work = { lat: 23.5, lng: 120.5 } // 約 5.6 km
@@ -105,7 +119,7 @@ describe('貼齊道路', () => {
     }) as unknown as typeof fetch
     const r1 = await snapLeg(pts, 'scooter', ok)
     expect(r1).not.toBeNull()
-    expect(pts.every((q) => r1!.some((p) => p.lat === q.lat && p.lng === q.lng))).toBe(true)
+    expect(pts.every((q) => distToLine(r1!, q) <= 50)).toBe(true)
     expect(decodeURIComponent(lastUrl)).toContain('"costing":"motor_scooter"')
     expect(lastUrl.startsWith('https://valhalla1.openstreetmap.de/trace_route?json=')).toBe(true)
     await snapLeg(pts, 'scooter', ok)
@@ -193,7 +207,8 @@ describe('挑點', () => {
 describe('貼齊後對回實際的點（實際的點是事實，路線一定經過）', () => {
   // lat 每 0.000009 度約 1 m（南北），lng 每 0.0000098 度約 1 m（東西，緯度 23.5）
   const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
-  const hasAll = (out: { lat: number; lng: number }[], raw: { lat: number; lng: number }[]) => raw.every((r) => out.some((p) => p.lat === r.lat && p.lng === r.lng))
+  // 每個實際的點都在路線旁邊、誤差範圍內（測試的點精確度都是 10 m 以下 → 容許 20 m）
+  const hasAll = (out: { lat: number; lng: number }[], raw: { lat: number; lng: number }[]) => raw.every((r) => distToLine(out, r) <= 20)
 
   it('騎過頭迴轉、貼齊繞街區一圈：照實際的點折返，每個點都在路線上', () => {
     const raw = [0, 50, 100, 150, 200, 250, 300, 250, 200, 150].map((m) => P(m))
@@ -231,5 +246,50 @@ describe('貼齊後對回實際的點（實際的點是事實，路線一定經�
     const snapped = [P(0), P(100), P(200), P(300)]
     const out = tidySnapped(snapped, raw)
     expect(hasAll(out, raw)).toBe(true)
+  })
+})
+
+describe('2026-11-22 使用者手繪路線對照', () => {
+  const P = (south: number, east = 0) => ({ lat: home.lat - south * 0.000009, lng: home.lng + east * 0.0000098 })
+  const T = (sec: number, south: number, east: number, accuracy: number): TrackPoint => ({
+    id: `t${sec}`, time: new Date(2026, 10, 21, 23, 32).getTime() + sec * 1000, date: '2026-11-21', ...P(south, east), accuracy, source: 'auto',
+  })
+
+  it('走路回家（實際 23:32:25～23:34:39 的相對位置），32:56 那點飄到馬路對面：畫線時跳過', () => {
+    // 原始點減掉第一點、換算成公尺（往南、往東）
+    const real: [string, number, number, number][] = [
+      ['32:25', 25.054015, 121.451181, 14],
+      ['32:56', 25.053697, 121.451412, 14],
+      ['33:30', 25.053495, 121.451331, 19],
+      ['34:07', 25.053157, 121.451281, 17],
+      ['34:39', 25.053113, 121.451101, 16],
+    ]
+    const walk = real.map(([, lat, lng, acc], i) => T(i * 32, (real[0][1] - lat) * 111320, (lng - real[0][2]) * 100890, acc))
+    walk.forEach((p, i) => (p.id = real[i][0]))
+    const out = dropWobble(walk).map((p) => p.id)
+    expect(out).not.toContain('32:56')
+    expect(out[0]).toBe('32:25')
+    expect(out.at(-1)).toBe('34:39')
+  })
+
+  it('真的轉彎（偏離比誤差大很多）不會被跳過', () => {
+    const turn = [T(0, 0, 0, 8), T(30, 200, 0, 8), T(60, 200, 200, 8)]
+    expect(dropWobble(turn)).toHaveLength(3)
+  })
+
+  it('同一條直路往返，點在路兩旁 ±10 m：畫在路上，沒有突出的折線', () => {
+    const raw = [T(0, 0, 8, 10), T(30, 150, -9, 10), T(60, 300, 10, 10), T(90, 150, -8, 10), T(120, 0, 9, 10)]
+    // 貼齊道路：都在 east = 0 那條路上
+    const snapped = [P(0), P(150), P(300), P(150), P(0)]
+    const out = tidySnapped(snapped, raw)
+    expect(out.every((p) => Math.abs(p.lng - home.lng) / 0.0000098 < 1)).toBe(true)
+  })
+
+  it('30 秒內繞進巷子再出來（比直線長很多但騎得到）：照貼齊的巷子畫', () => {
+    // 時速約 36 km/h；兩點直線 50 m，實際往西 50、往北 30、往東 50（130 m）
+    const raw = [T(0, 0, 300, 8), T(30, 0, 0, 8), T(61, -30, 0, 8)]
+    const snapped = [P(0, 300), P(0, 0), P(0, -50), P(-30, -50), P(-30, 0)]
+    const out = tidySnapped(snapped, raw)
+    expect(out.some((p) => (p.lng - home.lng) / 0.0000098 < -45)).toBe(true)
   })
 })

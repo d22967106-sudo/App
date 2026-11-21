@@ -93,6 +93,61 @@ function reallyMoved(raw: TrackPoint[], from: Stay | null, to: Stay | null, maxK
   return raw.some((p) => anchors.every((a) => distanceM(a, p) >= Math.max(60, (p.accuracy ?? 0) * 1.5)))
 }
 
+/** 點離前後兩點連線至少偏這麼多（公尺）才可能是飄移（貼在線上的點留著，貼齊道路才有足夠的點） */
+const WOBBLE_MIN_M = 5
+/** 飄移最多算到這麼遠（公尺）；偏更遠的一定留著 */
+const WOBBLE_MAX_M = 25
+
+/** 點到線段的距離（公尺，短距離平面近似） */
+function offsetFromChord(a: GeoPoint, p: GeoPoint, b: GeoPoint): number {
+  const k = Math.cos((p.lat * Math.PI) / 180) * 111320
+  const ax = (a.lng - p.lng) * k
+  const ay = (a.lat - p.lat) * 111320
+  const bx = (b.lng - p.lng) * k
+  const by = (b.lat - p.lat) * 111320
+  const dx = bx - ax
+  const dy = by - ay
+  const len2 = dx * dx + dy * dy
+  const t = len2 ? Math.max(0, Math.min(1, (-ax * dx - ay * dy) / len2)) : 0
+  return Math.hypot(ax + t * dx, ay + t * dy)
+}
+
+/**
+ * 畫線時跳過飄移的點：離前後兩點連線偏 5 m 以上、但沒超過它自己的精確度（最多 25 m）
+ * ＝在誤差範圍內，多半是定位飄掉（2026-11-21 走路回家，兩個點跑到中港路對面，誤差圈剛好跨過馬路）。
+ * 轉彎、迴轉的點偏離很遠，不會被跳過；頭尾不動。原始定位點本身不改，只是不拿來畫線。
+ */
+export function dropWobble(pts: TrackPoint[]): TrackPoint[] {
+  const ok = (p: TrackPoint, a: TrackPoint, b: TrackPoint, min: number) => {
+    if (p.accuracy == null) return false
+    const off = offsetFromChord(a, p, b)
+    return off >= min && off <= Math.min(p.accuracy, WOBBLE_MAX_M)
+  }
+  // 留下的點（原本的序號）；跳過一個點時，之前跳過、夾在中間的點也都要還在新連線的誤差範圍內，
+  // 才不會連續跳點把真的轉角一點一點削掉
+  let keep = pts.map((_, i) => i)
+  for (;;) {
+    let best = -1
+    let bestRatio = Infinity
+    for (let k = 1; k < keep.length - 1; k++) {
+      const a = pts[keep[k - 1]]
+      const p = pts[keep[k]]
+      const b = pts[keep[k + 1]]
+      if (!ok(p, a, b, WOBBLE_MIN_M)) continue
+      let fine = true
+      for (let j = keep[k - 1] + 1; j < keep[k + 1] && fine; j++) if (j !== keep[k]) fine = ok(pts[j], a, b, 0)
+      if (!fine) continue
+      const ratio = offsetFromChord(a, p, b) / p.accuracy!
+      if (ratio < bestRatio) {
+        bestRatio = ratio
+        best = k
+      }
+    }
+    if (best < 0) return keep.map((i) => pts[i])
+    keep = keep.filter((_, k) => k !== best)
+  }
+}
+
 /** 停留的中心當成一個點（移動段從上一個停留的中心畫到下一個停留的中心） */
 function stayPoint(s: Stay, time: number, date: string): TrackPoint {
   return { id: `${s.id}-c${time}`, time, date, lat: s.lat, lng: s.lng, source: 'auto' }
@@ -120,7 +175,7 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
     // 所以頭尾接上停留的中心：從哪裡出發、到了哪裡，線一定接得起來
     const date = raw[0]?.date ?? pts[0].date
     const withEnds = [...(g.from ? [stayPoint(g.from, g.t0, date)] : []), ...raw.filter((p) => !(g.from && p.time === g.t0) && !(g.to && p.time === g.t1)), ...(g.to ? [stayPoint(g.to, g.t1, date)] : [])]
-    const seg = cleanPath(withEnds, LEG_MAX_STEP_M, 15)
+    const seg = dropWobble(cleanPath(withEnds, LEG_MAX_STEP_M, 15))
     if (seg.length < 2) continue
     const km = pathKm(seg)
     const distinct = distinctStays(g.from, g.to)

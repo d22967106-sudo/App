@@ -6,6 +6,19 @@ import { tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
 
+/** 點離折線多近（公尺，每段切 20 份取樣，測試用） */
+function distToLine(line: { lat: number; lng: number }[], p: { lat: number; lng: number }): number {
+  let best = Infinity
+  for (let i = 0; i < line.length - 1; i++)
+    for (let k = 0; k <= 20; k++) {
+      const q = { lat: line[i].lat + ((line[i + 1].lat - line[i].lat) * k) / 20, lng: line[i].lng + ((line[i + 1].lng - line[i].lng) * k) / 20 }
+      best = Math.min(best, distanceM(q, p))
+    }
+  if (line.length === 1) best = distanceM(line[0], p)
+  return best
+}
+
+
 /**
  * 使用者 2026-11-21 的真實背景定位（Overland，約 30 秒一點），座標整體平移到假的位置（相對距離不變）。
  * 早上：07:18 從家往西走約 90 m 到早餐店、待到 07:56、走回家；晚上 22:16 騎車往南約 1.4 km。
@@ -122,7 +135,7 @@ describe('真實的一天：迴轉處的小三角', () => {
     const leg = computeLegs(t, dayStays(t)).at(-1)!
     const out = tidySnapped(DRAWN, leg.points)
     // 每個實際的點都在路線上
-    expect(leg.points.every((r) => out.some((p) => p.lat === r.lat && p.lng === r.lng))).toBe(true)
+    expect(leg.points.every((r) => distToLine(out, r) <= 50)).toBe(true)
     // 大部分還是沿著貼齊的道路畫（不是全部退回直線）
     const fromSnap = out.filter((p) => DRAWN.some((d) => d.lat === p.lat && d.lng === p.lng)).length
     expect(fromSnap).toBeGreaterThan(DRAWN.length * 0.7)
@@ -158,7 +171,7 @@ describe('真實的一天：找停車位繞一圈', () => {
     const snapped = [...PARKING.slice(0, 22), { lat: 25.053245 - 1.573, lng: 121.451425 - 1.001 }, ...PARKING.slice(22)]
     for (const out of [tidySnapped(snapped, PARKING)]) {
       // 每個實際的點都在路線上
-      expect(PARKING.every((r) => out.some((p) => p.lat === r.lat && p.lng === r.lng))).toBe(true)
+      expect(PARKING.every((r) => distToLine(out, r) <= 50)).toBe(true)
       // 往西北那一圈（原本 25.0543,121.4478 一帶）還在
       expect(out.some((p) => p.lng < 121.4482 - 1.001 && p.lat > 25.0535 - 1.573)).toBe(true)
       expect(out.length).toBeGreaterThanOrEqual(PARKING.length - 1)

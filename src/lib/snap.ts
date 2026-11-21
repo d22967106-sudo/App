@@ -198,7 +198,7 @@ function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
  * 路線一定經過每個實際的點；點和點之間能用貼齊道路的線就用，不合理就直線。
  * raw：這段移動的實際定位點（依時間）。snapped：貼齊道路服務回來的線。
  */
-export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number })[]): GeoPoint[] {
+export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number; time?: number })[]): GeoPoint[] {
   if (raw.length < 2) return raw.slice()
   if (snapped.length < 2) return raw.slice()
   const o = raw[0]
@@ -208,6 +208,11 @@ export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: nu
   const arcAt = (at: number) => {
     const i = Math.min(Math.floor(at), S.length - 1)
     return i >= S.length - 1 ? cum[S.length - 1] : cum[i] + (at - i) * (cum[i + 1] - cum[i])
+  }
+  const pointAt = (at: number): GeoPoint => {
+    const i = Math.min(Math.floor(at), S.length - 2)
+    const t = Math.max(0, Math.min(1, at - i))
+    return { lat: snapped[i].lat + (snapped[i + 1].lat - snapped[i].lat) * t, lng: snapped[i].lng + (snapped[i + 1].lng - snapped[i].lng) * t }
   }
   /** 線段 i 上離 p 最近的位置 */
   const onSeg = (i: number, px: number, py: number) => {
@@ -262,26 +267,37 @@ export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: nu
     return deg > UTURN_DEG
   })
 
-  // 2. 接起來：每個實際的點都放進路線；兩個都被經過的相鄰點之間，貼齊線合理才用
-  //    （迴轉點前後那一段要求更嚴：幾乎是直線才用，不然照實際的點折返）
-  const out: GeoPoint[] = [raw[0]]
+  // 2. 接起來：
+  //    - 每個點都在路線上：貼齊線經過它（在它的誤差範圍內）就畫在路上的那個位置
+  //      （點本來就有 5～20 m 誤差，硬畫在點的正中心會一下拐出去一下拐回來，2026-11-22 使用者回報「直線往返多出突出的折線」）；
+  //      貼齊線沒經過的點照原本的位置畫
+  //    - 相鄰兩點之間：貼齊線的長度在「這段時間照當下速度走得到的距離」內就用
+  //      （30 秒一點，騎車時兩點之間可能繞進巷子，不能只看比直線長幾倍）；
+  //      迴轉點前後要很接近直線才用，不然照實際的點折返
+  const speed = raw.map((p, r) => (r ? distanceM(raw[r - 1], p) / Math.max(1, (p.time ?? 0) - (raw[r - 1].time ?? 0)) * 1000 : 0))
+  const at0 = (r: number) => (pos[r] != null ? pointAt(pos[r]!) : raw[r])
+  const out: GeoPoint[] = [at0(0)]
   for (let r = 1; r < raw.length; r++) {
     const a = pos[r - 1]
     const b = pos[r]
     if (a != null && b != null && b > a) {
       const len = arcAt(b) - arcAt(a)
       const straight = distanceM(raw[r - 1], raw[r])
-      if (len <= (uturn[r - 1] || uturn[r] ? maxAtUturn(straight) : maxBetween(straight))) {
-        for (let i = Math.floor(a) + 1; i < b && i < snapped.length; i++) out.push(snapped[i])
-      }
+      const t0 = raw[r - 1].time
+      const t1 = raw[r].time
+      // 這段時間照前後的速度（取快的、再寬鬆 1.3 倍）走得到多遠
+      const v = Math.max(speed[r] || 0, speed[r + 1] || 0, speed[r - 1] || 0)
+      const reach = t0 != null && t1 != null ? ((t1 - t0) / 1000) * v * 1.3 : 0
+      const limit = uturn[r - 1] || uturn[r] ? maxAtUturn(straight) : Math.max(maxBetween(straight), reach)
+      if (len <= limit) for (let i = Math.floor(a) + 1; i < b && i < snapped.length; i++) out.push(snapped[i])
     }
-    out.push(raw[r])
+    out.push(at0(r))
   }
   return out
 }
 
 /** 貼齊後的整理：路線經過每個實際的點，點之間能貼齊就貼齊 */
-export function tidySnapped(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number })[]): GeoPoint[] {
+export function tidySnapped(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: number; time?: number })[]): GeoPoint[] {
   return alignToRaw(snapped, raw)
 }
 
