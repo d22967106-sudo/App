@@ -14,7 +14,7 @@ import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
 import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
-import { getLegModes, getRouteSettings, onRouteSettingsChange, setLegMode, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
+import { getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegMode, snapLeg, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto, MAX_ACCURACY } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
@@ -275,6 +275,8 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   }, [routeSettings.rawPoints, rawTrack])
 
   const copyRawPoints = async () => {
+    const pts0 = (rawTrack ?? []).filter(isAuto).length
+    const build = async (): Promise<string> => {
     const pts = (rawTrack ?? []).filter(isAuto).sort((a, b) => a.time - b.time)
     const pad = (n: number) => String(n).padStart(2, '0')
     const lines = pts.map((p) => {
@@ -282,14 +284,33 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.accuracy ?? ''}`
     })
     // 各段畫在地圖上的線（貼齊道路後的結果），除錯貼齊用
-    const legLines = legs.map((l, i) => {
-      const line = legLine(l)
-      return [`# 第 ${i + 1} 段 ${formatTime(l.start)}–${formatTime(l.end)} ${modeName(modeOf(l).mode)} 畫出的線 ${line.length} 點`, line.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(' ')].join('\n')
-    })
-    const text = [`摳摳手帳原始定位點 ${date}（時間,緯度,經度,精確度m）共 ${pts.length} 點`, ...lines, ...legLines].join('\n')
+    const fmt = (ps: GeoPoint[]) => ps.map((p) => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`).join(' ')
+    const legLines = await Promise.all(
+      legs.map(async (l, i) => {
+        const mode = modeOf(l).mode
+        const line = legLine(l)
+        const rawSnap = await getSnapCache(l.points, mode)
+        return [
+          `# 第 ${i + 1} 段 ${formatTime(l.start)}–${formatTime(l.end)} ${modeName(mode)}`,
+          `## 這段用的點（時間,緯度,經度,精確度）`,
+          l.points.map((p) => `${new Date(p.time).toTimeString().slice(0, 8)},${p.lat.toFixed(6)},${p.lng.toFixed(6)},${p.accuracy ?? ''}`).join(' '),
+          `## 貼齊服務回傳 ${rawSnap ? rawSnap.length + ' 點' : '（沒有）'}`,
+          rawSnap ? fmt(rawSnap) : '',
+          `## 畫出的線 ${line.length} 點`,
+          fmt(line),
+        ].join('\n')
+      }),
+    )
+    return [`摳摳手帳原始定位點 ${date}（時間,緯度,經度,精確度m）共 ${pts.length} 點`, ...lines, ...legLines].join('\n')
+    }
     try {
-      await navigator.clipboard.writeText(text)
-      toast(`已複製 ${pts.length} 個點`)
+      // iPhone Safari 要在按下的當下開始寫剪貼簿：先交給 ClipboardItem 一個還在準備的內容
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+        await navigator.clipboard.write([new ClipboardItem({ 'text/plain': build().then((t) => new Blob([t], { type: 'text/plain' })) })])
+      } else {
+        await navigator.clipboard.writeText(await build())
+      }
+      toast(`已複製 ${pts0} 個點`)
     } catch {
       toast('複製失敗，請再按一次', 3000)
     }

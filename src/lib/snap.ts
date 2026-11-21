@@ -307,6 +307,13 @@ function lengthM(pts: GeoPoint[]): number {
   return m
 }
 
+/** 除錯：這段移動存在手機上的「貼齊服務原始回傳」（還沒對回實際的點），沒有就 null */
+export async function getSnapCache(points: TrackPoint[], mode: TravelMode): Promise<GeoPoint[] | null> {
+  if (mode === 'none' || points.length < 2) return null
+  const hit = await getMeta<Cached>(`snap2.${mode}.${hashPoints(points)}`)
+  return hit && 'pts' in hit ? hit.pts.map(([lat, lng]) => ({ lat, lng })) : null
+}
+
 /**
  * 一段移動貼齊道路後的路線；不貼齊（none）、沒網路、失敗或結果不合理（比原本長太多）都回傳 null。
  * fetcher 給測試用。
