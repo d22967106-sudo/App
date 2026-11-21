@@ -191,6 +191,18 @@ describe('接收端', () => {
     expect(w.yearAgo).toMatchObject({ date: '2025-11-18', summary: '很累但很開心', count: 1, photoId: 'p1', notes: [{ note: '去阿里山' }] })
   })
 
+  it('小工具：今天還沒有定位點時，用前幾天最後的位置（顯示「今天在 ○○」）', async () => {
+    sb.tables.track_points.set('y1', { id: 'y1', date: '2026-11-21', time: 100, lat: 25.04, lng: 121.45, accuracy: 10, source: 'auto' })
+    sb.tables.track_points.set('y2', { id: 'y2', date: '2026-11-21', time: 200, lat: 25.05312, lng: 121.4511, accuracy: 16, source: 'auto' })
+    sb.tables.track_points.set('y3', { id: 'y3', date: '2026-11-21', time: 300, lat: 25.1, lng: 121.5, accuracy: 900, source: 'auto' })
+    const w = await (await call('/auto/widget?date=2026-11-22', { method: 'GET' })).json()
+    expect(w.route).toEqual([[25.05312, 121.4511]])
+    // 今天有點就不用前一天的
+    sb.tables.track_points.set('t1', { id: 't1', date: '2026-11-22', time: 400, lat: 25.06, lng: 121.46, accuracy: 10, source: 'auto' })
+    const w2 = await (await call('/auto/widget?date=2026-11-22', { method: 'GET' })).json()
+    expect(w2.route).toEqual([[25.06, 121.46]])
+  })
+
   it('路線點太多會平均挑', () => {
     const pts = Array.from({ length: 1000 }, (_, i) => i)
     const t = thinRoute(pts, 150)

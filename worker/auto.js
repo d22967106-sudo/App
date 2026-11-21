@@ -309,8 +309,18 @@ export function thinRoute(points, max = 150) {
   return out
 }
 
-export function buildWidget({ date, entries, track, steps, yearAgo }) {
+/** 今天還沒有點時，前幾天最後一個可用的點（人還在那裡，跟 App 地圖頁的「延續點」一樣） */
+export function carryFrom(before) {
+  return before
+    .filter((p) => p.accuracy == null || p.accuracy <= 200)
+    .sort((a, b) => a.time - b.time)
+    .at(-1) || null
+}
+
+export function buildWidget({ date, entries, track, steps, yearAgo, carry = null }) {
   const today = entries.filter((e) => e.date === date)
+  // 今天還沒有任何點：用前幾天最後的位置當目前位置（小工具顯示「今天在 ○○」，不是「今天還沒有軌跡」）
+  if (!track.some((p) => p.accuracy == null || p.accuracy <= 200) && carry) track = [...track, carry]
   const expense = (list) => list.filter((e) => e.kind === 'expense')
   const route = thinRoute(
     [
@@ -451,7 +461,10 @@ export async function handleAuto(request, env, url) {
         read(env, key, 'entries', ya, ya),
         read(env, key, 'summaries', ya, ya),
       ])
-      return json(buildWidget({ date, entries, track, steps: steps[0], yearAgo: { date: ya, entries: yaEntries, summary: yaSummary[0] } }))
+      // 今天還沒有定位點：往前 7 天找最後的位置
+      const usable = track.some((p) => p.accuracy == null || p.accuracy <= 200)
+      const carry = usable ? null : carryFrom(await read(env, key, 'track_points', shiftDay(date, -7), shiftDay(date, -1)))
+      return json(buildWidget({ date, entries, track, steps: steps[0], yearAgo: { date: ya, entries: yaEntries, summary: yaSummary[0] }, carry }))
     }
 
     const pm = /^photo\/([A-Za-z0-9-]{1,64})$/.exec(path)
