@@ -183,6 +183,11 @@ const passTol = (acc?: number) => clamp((acc ?? 20) * 1.5, 20, 50)
 /** 兩個點之間的貼齊線最多可以比直線長多少：× 1.4 或多 40 m，取大的 */
 const maxBetween = (straight: number) => Math.max(straight * 1.4, straight + 40)
 
+/** 迴轉：前後兩段方向夾角超過這個（度）＝下一個點跑到上一個點後面 */
+const UTURN_DEG = 135
+/** 迴轉點前後的貼齊線要很接近直線才用（路線服務不允許路中迴轉，常常繞街區接回來） */
+const maxAtUturn = (straight: number) => straight * 1.15 + 15
+
 /** 以 o 為原點的平面座標（公尺），短距離夠準 */
 function toXY(o: GeoPoint, p: GeoPoint): [number, number] {
   const k = Math.cos((o.lat * Math.PI) / 180)
@@ -242,14 +247,31 @@ export function alignToRaw(snapped: GeoPoint[], raw: (GeoPoint & { accuracy?: nu
     if (found) at = found.at
   }
 
+  // 迴轉點：下一個點跑到上一個點後面（前後兩段方向夾角 > 135°，使用者提的判斷）
+  const uturn = raw.map((p, r) => {
+    if (r === 0 || r === raw.length - 1) return false
+    const [ax, ay] = toXY(o, raw[r - 1])
+    const [bx, by] = toXY(o, p)
+    const [cx, cy] = toXY(o, raw[r + 1])
+    const u = [bx - ax, by - ay]
+    const v = [cx - bx, cy - by]
+    const lu = Math.hypot(u[0], u[1])
+    const lv = Math.hypot(v[0], v[1])
+    if (lu < 5 || lv < 5) return false
+    const deg = (Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))) * 180) / Math.PI
+    return deg > UTURN_DEG
+  })
+
   // 2. 接起來：每個實際的點都放進路線；兩個都被經過的相鄰點之間，貼齊線合理才用
+  //    （迴轉點前後那一段要求更嚴：幾乎是直線才用，不然照實際的點折返）
   const out: GeoPoint[] = [raw[0]]
   for (let r = 1; r < raw.length; r++) {
     const a = pos[r - 1]
     const b = pos[r]
     if (a != null && b != null && b > a) {
       const len = arcAt(b) - arcAt(a)
-      if (len <= maxBetween(distanceM(raw[r - 1], raw[r]))) {
+      const straight = distanceM(raw[r - 1], raw[r])
+      if (len <= (uturn[r - 1] || uturn[r] ? maxAtUturn(straight) : maxBetween(straight))) {
         for (let i = Math.floor(a) + 1; i < b && i < snapped.length; i++) out.push(snapped[i])
       }
     }

@@ -211,6 +211,15 @@ describe('貼齊後對回實際的點（實際的點是事實，路線一定經�
     expect(out.every((p) => Math.abs(p.lng - home.lng) / 0.0000098 < 10)).toBe(true)
   })
 
+  it('迴轉（下一個點在上一個點後面）：貼齊只多繞一個小圈也不用，照實際的點折返', () => {
+    // 往南 0 → 100 → 200 迴轉 → 100；貼齊在 200 m 那裡往東繞了 15 × 20 m 的小圈（多 30 m，一般標準會放過）
+    const raw = [P(0), P(100), P(200), P(100)]
+    const snapped = [P(0), P(100), P(190), P(190, 15), P(210, 15), P(210), P(200), P(100)]
+    const out = tidySnapped(snapped, raw)
+    expect(hasAll(out, raw)).toBe(true)
+    expect(out.every((p) => Math.abs(p.lng - home.lng) / 0.0000098 < 5)).toBe(true)
+  })
+
   it('兩點之間的路本來就彎出去 80 m：照貼齊的彎路畫', () => {
     const raw = [P(0), P(300), P(600)]
     const snapped = [P(0), P(100, 50), P(150, 80), P(200, 50), P(300), P(450, -70), P(600)]
