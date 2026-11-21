@@ -102,7 +102,15 @@ function medianAccuracy(points: TrackPoint[]): number {
   return a.length ? a[Math.floor(a.length / 2)] : 20
 }
 
-async function valhalla(endpoint: 'trace_route' | 'route', body: unknown, fetcher: typeof fetch): Promise<GeoPoint[]> {
+/**
+ * 對軌跡時不管單行道、禁止迴轉／轉彎、通行限制：人已經走過了，只是要找出走的是哪條路。
+ * 官方文件：ignore_oneways、ignore_restrictions、ignore_access「特別適合把 GPS 軌跡對到道路上」。
+ * 沒開時，迴轉或逆向的地方會被逼著繞街區（2026-11-21 在家附近同一個小圈繞了兩次）。
+ */
+const IGNORE_RULES = { ignore_oneways: true, ignore_restrictions: true, ignore_access: true }
+
+async function valhalla(endpoint: 'trace_route' | 'route', body: { costing: string } & Record<string, unknown>, fetcher: typeof fetch): Promise<GeoPoint[]> {
+  if (body.costing !== 'pedestrian') body = { ...body, costing_options: { [body.costing]: IGNORE_RULES } }
   const res = await throttled(() => fetcher(`${VALHALLA_BASE}/${endpoint}?json=${encodeURIComponent(JSON.stringify(body))}`))
   if (!res.ok) throw new Error(`Valhalla ${res.status}`)
   const data = (await res.json()) as { trip?: { legs?: { shape: string }[] } }
@@ -310,7 +318,7 @@ function lengthM(pts: GeoPoint[]): number {
 /** 除錯：這段移動存在手機上的「貼齊服務原始回傳」（還沒對回實際的點），沒有就 null */
 export async function getSnapCache(points: TrackPoint[], mode: TravelMode): Promise<GeoPoint[] | null> {
   if (mode === 'none' || points.length < 2) return null
-  const hit = await getMeta<Cached>(`snap2.${mode}.${hashPoints(points)}`)
+  const hit = await getMeta<Cached>(`snap3.${mode}.${hashPoints(points)}`)
   return hit && 'pts' in hit ? hit.pts.map(([lat, lng]) => ({ lat, lng })) : null
 }
 
@@ -320,8 +328,8 @@ export async function getSnapCache(points: TrackPoint[], mode: TravelMode): Prom
  */
 export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: typeof fetch = fetch): Promise<GeoPoint[] | null> {
   if (mode === 'none' || points.length < 2) return null
-  // snap2：改了比對方式（2026-11-21），以前失敗的結果要重試
-  const key = `snap2.${mode}.${hashPoints(points)}`
+  // snap3：2026-11-22 改成不管單行道與迴轉限制，以前存的結果要重算
+  const key = `snap3.${mode}.${hashPoints(points)}`
   const hit = await getMeta<Cached>(key)
   if (hit && 'pts' in hit) return tidySnapped(hit.pts.map(([lat, lng]) => ({ lat, lng })), points)
   if (hit && 'failAt' in hit && Date.now() - hit.failAt < RETRY_MS) return null

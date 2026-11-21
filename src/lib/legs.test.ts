@@ -121,6 +121,8 @@ describe('貼齊道路', () => {
     expect(r1).not.toBeNull()
     expect(pts.every((q) => distToLine(r1!, q) <= 50)).toBe(true)
     expect(decodeURIComponent(lastUrl)).toContain('"costing":"motor_scooter"')
+    // 對軌跡不管單行道、禁止迴轉
+    expect(decodeURIComponent(lastUrl)).toContain('"costing_options":{"motor_scooter":{"ignore_oneways":true,"ignore_restrictions":true,"ignore_access":true}}')
     expect(lastUrl.startsWith('https://valhalla1.openstreetmap.de/trace_route?json=')).toBe(true)
     await snapLeg(pts, 'scooter', ok)
     expect(calls).toBe(1)
