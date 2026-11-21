@@ -265,6 +265,52 @@ export function fixDetours(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
   return out
 }
 
+/** 尖刺：線在這個點折回去的夾角小於這個（度） */
+const SPIKE_DEG = 60
+/** …而且這個點離實際路線超過這麼遠（公尺）才拿掉 */
+const SPIKE_OFF_M = 10
+
+/**
+ * 拿掉尖刺：貼齊後線突然折回去（夾角 < 60°）、而且那個點離實際的點超過 10 m（繞路修掉後剩下的小三角、迴轉時衝過頭的部分）。
+ * 一般路口轉彎約 90°，不會被拿掉。頭尾不動。
+ */
+export function removeSpikes(path: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
+  if (path.length < 3 || raw.length < 2) return path
+  const o = raw[0]
+  const line = raw.map((p) => toXY(o, p))
+  const pts = path.slice()
+  for (let changed = true; changed; ) {
+    changed = false
+    for (let i = 1; i < pts.length - 1; i++) {
+      const [ax, ay] = toXY(o, pts[i - 1])
+      const [bx, by] = toXY(o, pts[i])
+      const [cx, cy] = toXY(o, pts[i + 1])
+      const u = [ax - bx, ay - by]
+      const v = [cx - bx, cy - by]
+      const lu = Math.hypot(u[0], u[1])
+      const lv = Math.hypot(v[0], v[1])
+      if (lu < 1 || lv < 1) {
+        // 重複的點直接拿掉
+        pts.splice(i, 1)
+        changed = true
+        break
+      }
+      const deg = (Math.acos(Math.max(-1, Math.min(1, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))) * 180) / Math.PI
+      if (deg < SPIKE_DEG && nearestOnLine(o, line, pts[i]).d > SPIKE_OFF_M) {
+        pts.splice(i, 1)
+        changed = true
+        break
+      }
+    }
+  }
+  return pts
+}
+
+/** 貼齊後的整理：先修繞路，再拿掉尖刺 */
+export function tidySnapped(snapped: GeoPoint[], raw: GeoPoint[]): GeoPoint[] {
+  return removeSpikes(fixDetours(snapped, raw), raw)
+}
+
 function lengthM(pts: GeoPoint[]): number {
   let m = 0
   for (let i = 1; i < pts.length; i++) m += distanceM(pts[i - 1], pts[i])
@@ -280,7 +326,7 @@ export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: t
   // snap2：改了比對方式（2026-11-21），以前失敗的結果要重試
   const key = `snap2.${mode}.${hashPoints(points)}`
   const hit = await getMeta<Cached>(key)
-  if (hit && 'pts' in hit) return fixDetours(hit.pts.map(([lat, lng]) => ({ lat, lng })), points)
+  if (hit && 'pts' in hit) return tidySnapped(hit.pts.map(([lat, lng]) => ({ lat, lng })), points)
   if (hit && 'failAt' in hit && Date.now() - hit.failAt < RETRY_MS) return null
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return null
   try {
@@ -292,7 +338,7 @@ export async function snapLeg(points: TrackPoint[], mode: TravelMode, fetcher: t
     // 吸到很遠的路、繞一大圈＝比對錯了，用原本的線
     if (lengthM(out) > lengthM(points) * 2.5 + 500) throw new Error('貼齊後繞太遠')
     await setMeta(key, { pts: out.map((p) => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lng * 1e6) / 1e6]) } satisfies Cached)
-    return fixDetours(out, points)
+    return tidySnapped(out, points)
   } catch {
     await setMeta(key, { failAt: Date.now() } satisfies Cached)
     return null
