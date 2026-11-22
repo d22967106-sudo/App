@@ -6,9 +6,10 @@
   mapframe.png                       地圖卡片的撕邊框：撕邊外面是小工具背景紙的同一塊（所以看起來像撕過的地圖放在紙上），
                                      邊緣焦黃、捲角、影子；撕邊裡面透明（下面是地圖）。CARD_POS 要跟腳本的版面一致
   tag.png                            地圖右下角的標籤：揉皺、撕邊、泛白的舊紙片（焦褐邊、斑點、影子；大小要跟腳本的 TAG 一樣）
-  glyphs.json                        手寫中文字形（霞鶩文楷 TC，只收腳本裡 GLYPH_SET 那幾個固定出現的字）
-                                     需要字體檔：python3 scriptable/make-widget-art.py <LXGWWenKaiTC-Regular.ttf>
-                                     （https://github.com/lxgw/LxgwWenkaiTC ，OFL 授權，授權文字一起放在 public/widget/）
+  glyphs.json                        手寫中文字形（南構無恙行書，只收腳本裡 GLYPH_SET 那幾個固定出現的字）
+                                     需要字體檔：python3 scriptable/make-widget-art.py <南构无恙行书.ttf>
+                                     （字體檔從 npm 套件 @fontpkg/nangouwuyangxingshu 取得；字體只有簡體字，
+                                      所以固定字句都挑繁簡同形的字。個人非商業使用）
 用法：python3 scriptable/make-widget-art.py（需要 numpy、Pillow）
 小工具從 App 網址下載這些圖並存在手機上；改了圖要把腳本的 ART_VER 加 1。
 放大鏡的位置大小（CARD、LENS）要跟腳本裡的一樣。
@@ -480,7 +481,7 @@ def glyphs(ttf_path, chars):
         parts = []
         lx = ly = 0
         for c in pen.contours:
-            q = [(round(x / GQ), round(y / GQ)) for x, y in c]
+            q = [(round(x / GQ * 1000 / t['head'].unitsPerEm), round(y / GQ * 1000 / t['head'].unitsPerEm)) for x, y in c]
             if len(q) > 1 and q[0] == q[-1]:
                 q = q[:-1]
             if len(q) < 3:
@@ -494,8 +495,10 @@ def glyphs(ttf_path, chars):
                 nums += [x - lx, y - ly]
                 lx, ly = x, y
             parts.append('M' + ' '.join(str(v) for v in nums))
-        out[ch] = [round(hmtx[g][0] / GQ), ''.join(parts)]
-    return {'em': 1000 // GQ, 'g': out}
+        out[ch] = [round(hmtx[g][0] / GQ * 1000 / t['head'].unitsPerEm), ''.join(parts)]
+    upem = t['head'].unitsPerEm
+    asc = t['hhea'].ascent
+    return {'em': 1000 // GQ, 'asc': round(asc / upem, 3), 'g': out}
 
 
 def glyph_set():

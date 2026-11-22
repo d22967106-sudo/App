@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.11
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.12
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,16 +27,20 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 9
+const ART_VER = 10
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
 /**
- * 中文手寫字：霞鶩文楷 TC（LXGW WenKai TC，OFL 免費授權）。Scriptable 用不到 iPhone 另外裝的字體，
+ * 中文行書字：南構無恙行書。Scriptable 用不到 iPhone 另外裝的字體，
  * 所以把「固定出現的字」的外形先做成 widget/glyphs.json（make-widget-art.py 讀下面這行產生），
  * 小工具自己畫成圖片。不在這行裡的字（或下載不到時）就用系統字。改這行要重新產生 glyphs.json 並把 ART_VER 加 1。
+ * 這套字體只有簡體字，所以固定字句都挑繁簡寫法相同的字（例如「今天在此」「今天未留足印」）。
  */
-const GLYPH_SET = '今日支出　今天記了筆還沒有帳本月剩超出在這裡走足跡離線摳手一年前的花 0123456789$,.km'
+/** 這套行書的字形在字框裡畫得比較小、字距寬：畫的時候放大、字距收緊 */
+const CN_SCALE = 1.3
+const CN_TRACK = 0.88
+const GLYPH_SET = '今日支出　共件尚未本月剩超出今天在此走了留足印一年前的花 0123456789$,.km'
 /** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
 const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
@@ -168,16 +172,21 @@ async function loadGlyphs() {
 
 /** 把一行字畫成圖片（字形座標：1 em＝g.em 單位，y 往上；每個輪廓 M 開頭，後面是相對前一點的位移） */
 function glyphImage(str, size, color, G) {
+  size = size * CN_SCALE
   const k = size / G.em
   const chars = [...str]
-  const width = Math.max(1, chars.reduce((w, ch) => w + G.g[ch][0], 0) * k)
+  const advOf = (ch) => G.g[ch][0] * (ch.charCodeAt(0) > 0x2000 ? CN_TRACK : 1)
+  const width = Math.max(1, chars.reduce((w, ch) => w + advOf(ch), 0) * k)
   const h = size * 1.28
-  const base = size * 1.0
+  const base = size * (G.asc || 0.93) + size * 0.06
   const dc = canvas(Math.ceil(width) + 1, Math.ceil(h))
   dc.setFillColor(color)
   let pen = 0
   for (const ch of chars) {
-    const [adv, d] = G.g[ch]
+    const d = G.g[ch][1]
+    const adv = advOf(ch)
+    // 收緊字距時，字形往左挪一半，保持置中
+    const shift = (G.g[ch][0] - adv) / 2
     if (d) {
       const path = new Path()
       const tok = d.match(/M|-?\d+/g)
@@ -194,7 +203,7 @@ function glyphImage(str, size, color, G) {
         x += +tok[i]
         y += +tok[i + 1]
         i += 2
-        const p = new Point((pen + x) * k, base - y * k)
+        const p = new Point((pen + x - shift) * k, base - y * k)
         if (first) path.move(p)
         else path.addLine(p)
         first = false
@@ -909,7 +918,7 @@ async function errorWidget(msg) {
   const w = new ListWidget()
   await paintBg(w, config.widgetFamily === 'small' ? 'small' : 'medium')
   w.setPadding(18, 20, 18, 20)
-  await cnText(w, '摳摳手帳', 14, C.primary)
+  text(w, '摳摳手帳', 14, C.primary, Font.semiboldSystemFont(14))
   w.addSpacer(6)
   const t = w.addText(msg)
   t.font = Font.systemFont(11)
@@ -932,7 +941,7 @@ function headerRows(stack) {
 /** 金額下面的小字：今日支出・今天幾筆 */
 async function countLine(stack, d) {
   const n = d.todayCount || 0
-  await cnText(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 10, C.sub)
+  await cnText(stack, n ? `今日支出　今天共 ${n} 件` : '今日支出　今日尚未支出', 10, C.sub)
 }
 
 /** 本月：分隔線（或預算進度線）＋金額 */
@@ -975,19 +984,19 @@ async function infoRow(stack, d, stale) {
   }
   if (stale) {
     if (any) row.addSpacer(9)
-    await iconText(row, 'wifi.slash', '離線', 10, C.over)
+    await iconText(row, 'wifi.slash', '', 10, C.over) // 只留圖示（「離線」兩字不在行書字形裡）
   }
 }
 
-/** 右邊地圖卡片：模糊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置；沒有點＝台灣），右下角紙片寫距離或「在這裡」 */
+/** 右邊地圖卡片：模糊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置；沒有點＝台灣），右下角紙片寫距離或「在此」 */
 async function rightCard(row, d) {
   const route = d.route || []
   const view = mapView(route)
   // 不寫地名（地名的字不在手寫字形裡）
   const top = '今天'
-  let main = '還沒有足跡'
+  let main = '未留足印'
   if (view.route) main = `走了 ${routeKm(route).toFixed(1)} km`
-  else if (view.pin) main = '在這裡'
+  else if (view.pin) main = '在此'
   const { cx, cy, r } = LENS
   const card = row.addStack()
   card.size = new Size(CARD.w, CARD.h)
@@ -1005,7 +1014,7 @@ async function rightCard(row, d) {
   // 紙片上的字（紙片本身畫在底圖上）
   const capRow = card.addStack()
   capRow.addSpacer()
-  // 一行置中寫在皺紙片上：「今天走了 1.1 km」「今天在這裡」「今天還沒有足跡」
+  // 一行置中寫在皺紙片上：「今天走了 1.1 km」「今天在此」「今天未留足印」
   const cap = capRow.addStack()
   cap.layoutHorizontally()
   cap.centerAlignContent()
