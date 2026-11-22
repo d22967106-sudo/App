@@ -3,6 +3,11 @@
   magnifier.png                      地圖卡片上的放大鏡（銅框＋木柄＋影子，透明背景，跟卡片一樣大）
   glass.png                          鏡片玻璃的反光與邊緣暗角（透明，蓋在清楚的地圖上）
   oldmap.png                         老地圖濾鏡（半透明泛黃、斑駁、紙紋、摺痕、四周變暗，蓋在地圖上；跟卡片一樣大）
+  mapframe.png                       地圖卡片的撕邊框：撕邊外面是小工具背景紙的同一塊（所以看起來像撕過的地圖放在紙上），
+                                     邊緣焦黃、捲角、影子；撕邊裡面透明（下面是地圖）。CARD_POS 要跟腳本的版面一致
+  glyphs.json                        手寫中文字形（霞鶩文楷 TC，只收腳本裡 GLYPH_SET 那幾個固定出現的字）
+                                     需要字體檔：python3 scriptable/make-widget-art.py <LXGWWenKaiTC-Regular.ttf>
+                                     （https://github.com/lxgw/LxgwWenkaiTC ，OFL 授權，授權文字一起放在 public/widget/）
 用法：python3 scriptable/make-widget-art.py（需要 numpy、Pillow）
 小工具從 App 網址下載這些圖並存在手機上；改了圖要把腳本的 ART_VER 加 1。
 放大鏡的位置大小（CARD、LENS）要跟腳本裡的一樣。
@@ -208,16 +213,20 @@ def oldmap():
     e = np.clip((np.maximum(dx, dy) + fbm(H, W, [W // 10, W // 30], rng) * 0.08 - 0.62) / 0.38, 0, 1) ** 1.5
     col = col * (1 - e[..., None] * 0.45)
     a = a + e * 0.3
-    # 摺痕（一直一橫）：一邊亮一邊暗
-    for pos, vertical in [(W * 0.43, True), (H * 0.6, False)]:
-        coord = xx if vertical else yy
-        other = yy if vertical else xx
-        wob = np.sin(other / (40 * S) * 2 * np.pi) * 1.2 * S
-        d = (coord - pos - wob) / S
-        light = np.exp(-((d + 0.6) / 0.5) ** 2)
-        dark = np.exp(-((d - 0.6) / 0.7) ** 2)
-        col = col + light[..., None] * 70 - dark[..., None] * 60
-        a = a + light * 0.15 + dark * 0.15
+    # 皺褶：很多條不同方向、長短的折痕，一邊亮一邊暗（揉過的紙）
+    for i in range(14):
+        ang = rng.uniform(0, np.pi)
+        px, py = rng.uniform(0, W), rng.uniform(0, H)
+        nx, ny = np.cos(ang), np.sin(ang)
+        d = ((xx - px) * nx + (yy - py) * ny) / S
+        along = ((xx - px) * -ny + (yy - py) * nx) / S
+        L = rng.uniform(25, 90)
+        fade = np.clip(1 - np.abs(along) / L, 0, 1) ** 0.7
+        strength = rng.uniform(0.4, 1.0) if i > 1 else 1.0
+        light = np.exp(-((d + 0.5) / 0.45) ** 2) * fade * strength
+        dark = np.exp(-((d - 0.6) / 0.9) ** 2) * fade * strength
+        col = col + light[..., None] * 55 - dark[..., None] * 45
+        a = a + light * 0.12 + dark * 0.12
     # 小斑點
     sp = Image.new('L', (W, H), 0)
     d2 = ImageDraw.Draw(sp)
@@ -230,6 +239,174 @@ def oldmap():
     return Image.fromarray(np.dstack([np.clip(col, 0, 255), np.clip(a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
 
 
+# ── 地圖撕邊框 ──
+# 卡片在中型小工具（338×158 點）裡的位置：右邊留 14、上面留 14（腳本 mediumWidget 的 padding）
+CARD_POS = (338 - 14 - CARD[0], 14)
+
+
+def mapframe():
+    W, H = CARD[0] * S, CARD[1] * S
+    rng = np.random.default_rng(21)
+    paper = vintage(338, 158, seed=2)  # 跟 paper-medium.jpg 同一張
+    x0, y0 = CARD_POS[0] * S, CARD_POS[1] * S
+    bg = np.asarray(paper, np.float32)[y0:y0 + H, x0:x0 + W]
+    # 撕邊的輪廓：往內縮 5 點，加上大小不同的鋸齒與幾個比較大的缺口
+    pts = []
+    inset = 5 * S
+    def jag(n):
+        a = np.cumsum(rng.normal(0, 1, n))
+        a = a - np.linspace(a[0], a[-1], n)
+        return a / (np.abs(a).max() + 1e-6)
+    per = [(W, 'top'), (H, 'right'), (W, 'bottom'), (H, 'left')]
+    for length, side in per:
+        n = int(length / (1.5 * S))
+        big = jag(n) * 2.6 * S + rng.normal(0, 0.6 * S, n)  # 大起伏＋細毛邊
+        for i in range(n):
+            t = i / n
+            d = inset + big[i]
+            if rng.random() < 0.012:
+                d += rng.uniform(3, 6) * S  # 偶爾一個缺口
+            if side == 'top':
+                pts.append((t * W, d))
+            elif side == 'right':
+                pts.append((W - d, t * H))
+            elif side == 'bottom':
+                pts.append((W - t * W, H - d))
+            else:
+                pts.append((d, H - t * H))
+    mask = Image.new('L', (W, H), 0)
+    ImageDraw.Draw(mask).polygon(pts, fill=255)
+    # 捲角：右上與左下剪掉一個斜角，另外畫翻起來的那塊
+    md = ImageDraw.Draw(mask)
+    c = 15 * S
+    md.polygon([(W - c - inset, 0), (W, 0), (W, c + inset)], fill=0)
+    md.polygon([(0, H - c - inset * 0.6), (0, H), (c + inset * 0.6, H)], fill=0)
+    mask = mask.filter(ImageFilter.GaussianBlur(0.6))
+    m = np.asarray(mask, np.float32) / 255
+    # 外面：背景紙＋撕邊投下的影子
+    sh = np.asarray(mask.transform((W, H), Image.AFFINE, (1, 0, -1.5 * S, 0, 1, -2.5 * S)).filter(ImageFilter.GaussianBlur(3 * S)), np.float32) / 255
+    out_rgb = bg * (1 - sh[..., None] * 0.45)
+    # 裡面：邊緣焦黃變深（越靠邊越深）
+    inner = np.asarray(mask.filter(ImageFilter.MinFilter(5)).filter(ImageFilter.GaussianBlur(6 * S)), np.float32) / 255
+    burn = np.clip(1 - inner, 0, 1) ** 1.3
+    burn = burn * (0.85 + 0.3 * (fbm(H, W, [W // 6, W // 20, 8], rng) + 1) / 2)
+    burn_rgb = np.zeros((H, W, 3), np.float32) + np.array([92, 56, 22], np.float32)
+    burn_a = np.clip(burn * 0.8, 0, 0.85)
+    # 撕開的紙邊：緊貼邊緣一圈淺色毛邊
+    edge = np.clip(m - np.asarray(mask.filter(ImageFilter.MinFilter(int(1.5 * S) | 1)), np.float32) / 255, 0, 1)
+    rgb = out_rgb * (1 - m[..., None]) + burn_rgb * m[..., None]
+    a = (1 - m) + m * burn_a
+    rgb = rgb * (1 - edge[..., None] * 0.7) + np.array([226, 206, 168], np.float32) * edge[..., None] * 0.7
+    a = np.maximum(a, edge * 0.8)
+
+    # 捲起來的角（翻過來的紙背：淺色、帶漸層與陰影）
+    def flap(poly, light_dir):
+        fm = Image.new('L', (W, H), 0)
+        ImageDraw.Draw(fm).polygon(poly, fill=255)
+        fm = fm.filter(ImageFilter.GaussianBlur(0.6))
+        f = np.asarray(fm, np.float32) / 255
+        shadow = np.asarray(fm.transform((W, H), Image.AFFINE, (1, 0, -light_dir[0] * 2 * S, 0, 1, -light_dir[1] * 2 * S)).filter(ImageFilter.GaussianBlur(2 * S)), np.float32) / 255
+        nonlocal_rgb = rgb * (1 - shadow[..., None] * 0.35)
+        yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+        g = np.clip(((xx - poly[0][0]) * light_dir[0] + (yy - poly[0][1]) * light_dir[1]) / (c * 1.2) + 0.5, 0, 1)
+        col = np.zeros((H, W, 3), np.float32) + np.array([214, 192, 150], np.float32)
+        col = col * (0.82 + 0.25 * g[..., None])
+        return nonlocal_rgb * (1 - f[..., None]) + col * f[..., None], np.maximum(a + shadow * 0.35 * (1 - a), f)
+    rgb, a = flap([(W - c - inset, inset * 0.4), (W - inset * 0.4, c + inset), (W - c * 0.75 - inset, c * 0.8 + inset)], (-0.7, 0.7))
+    rgb, a = flap([(inset * 0.4, H - c - inset * 0.6), (c + inset * 0.6, H - inset * 0.4), (c * 0.7 + inset, H - c * 0.75 - inset)], (0.7, -0.7))
+    return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+
+
+# ── 手寫中文字形 ──
+GQ = 5  # 座標精度（字型 1000 單位＝1 em → 200）
+
+
+def glyphs(ttf_path, chars):
+    """把字形轉成簡化折線：{"em": 200, "g": {字: [字寬, "M x y dx dy ...M ..."]}}（座標相對前一點，y 往上）"""
+    from fontTools.ttLib import TTFont
+    from fontTools.pens.basePen import BasePen
+
+    class Poly(BasePen):
+        def __init__(self, gs):
+            super().__init__(gs)
+            self.contours = []
+
+        def _moveTo(self, p):
+            self.contours.append([p])
+
+        def _lineTo(self, p):
+            self.contours[-1].append(p)
+
+        def _qCurveToOne(self, c, p):
+            a = self.contours[-1][-1]
+            n = max(3, min(10, int((abs(c[0] - a[0]) + abs(c[1] - a[1]) + abs(p[0] - c[0]) + abs(p[1] - c[1])) / 20)))
+            for i in range(1, n + 1):
+                t = i / n
+                self.contours[-1].append(((1 - t) ** 2 * a[0] + 2 * (1 - t) * t * c[0] + t * t * p[0], (1 - t) ** 2 * a[1] + 2 * (1 - t) * t * c[1] + t * t * p[1]))
+
+        def _curveToOne(self, c1, c2, p):
+            a = self.contours[-1][-1]
+            for i in range(1, 9):
+                t = i / 8
+                self.contours[-1].append(tuple((1 - t) ** 3 * a[k] + 3 * (1 - t) ** 2 * t * c1[k] + 3 * (1 - t) * t * t * c2[k] + t ** 3 * p[k] for k in (0, 1)))
+
+        def _closePath(self):
+            pass
+
+    def dp(pts, tol=0.5):
+        if len(pts) < 3:
+            return pts
+        a, b = pts[0], pts[-1]
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L = (dx * dx + dy * dy) ** 0.5 or 1e-9
+        best, idx = -1, 0
+        for i in range(1, len(pts) - 1):
+            d = abs(dy * (pts[i][0] - a[0]) - dx * (pts[i][1] - a[1])) / L
+            if d > best:
+                best, idx = d, i
+        if best <= tol:
+            return [a, b]
+        return dp(pts[:idx + 1], tol)[:-1] + dp(pts[idx:], tol)
+
+    t = TTFont(ttf_path)
+    gs = t.getGlyphSet()
+    cmap = t.getBestCmap()
+    hmtx = t['hmtx']
+    out = {}
+    for ch in sorted(set(chars)):
+        if ord(ch) not in cmap:
+            raise SystemExit(f'字體裡沒有「{ch}」')
+        g = cmap[ord(ch)]
+        pen = Poly(gs)
+        gs[g].draw(pen)
+        parts = []
+        lx = ly = 0
+        for c in pen.contours:
+            q = [(round(x / GQ), round(y / GQ)) for x, y in c]
+            if len(q) > 1 and q[0] == q[-1]:
+                q = q[:-1]
+            if len(q) < 3:
+                continue
+            mid = len(q) // 2
+            q = dp(q[:mid + 1])[:-1] + dp(q[mid:] + [q[0]])[:-1]
+            if len(q) < 3:
+                continue
+            nums = []
+            for x, y in q:
+                nums += [x - lx, y - ly]
+                lx, ly = x, y
+            parts.append('M' + ' '.join(str(v) for v in nums))
+        out[ch] = [round(hmtx[g][0] / GQ), ''.join(parts)]
+    return {'em': 1000 // GQ, 'g': out}
+
+
+def glyph_set():
+    """讀腳本裡的 GLYPH_SET（固定出現的字）"""
+    import re
+    js = (Path(__file__).resolve().parent / 'ledger-widget.js').read_text(encoding='utf-8')
+    return re.search(r"const GLYPH_SET = '([^']*)'", js).group(1)
+
+
 if __name__ == '__main__':
     out = Path(__file__).resolve().parent.parent / 'public' / 'widget'
     out.mkdir(parents=True, exist_ok=True)
@@ -239,4 +416,12 @@ if __name__ == '__main__':
     magnifier().save(out / 'magnifier.png', optimize=True)
     glass().save(out / 'glass.png', optimize=True)
     oldmap().save(out / 'oldmap.png', optimize=True)
+    mapframe().save(out / 'mapframe.png', optimize=True)
+    import sys, json
+    if len(sys.argv) > 1:
+        g = glyphs(sys.argv[1], glyph_set())
+        (out / 'glyphs.json').write_text(json.dumps(g, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        print('glyphs', len(g['g']))
+    else:
+        print('沒給字體檔，glyphs.json 不更新')
     print('ok', out)

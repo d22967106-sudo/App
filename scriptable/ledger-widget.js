@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.8
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.9
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,16 +27,16 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 4
+const ART_VER = 6
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
 /**
- * 中文手寫字體：霞鶩文楷 TC（LXGW WenKai TC，OFL 免費授權）。要另外裝在 iPhone 上；
- * 沒裝或 Scriptable 抓不到時，iOS 會自動改用系統字，不會壞掉。
+ * 中文手寫字：霞鶩文楷 TC（LXGW WenKai TC，OFL 免費授權）。Scriptable 用不到 iPhone 另外裝的字體，
+ * 所以把「固定出現的字」的外形先做成 widget/glyphs.json（make-widget-art.py 讀下面這行產生），
+ * 小工具自己畫成圖片。不在這行裡的字（或下載不到時）就用系統字。改這行要重新產生 glyphs.json 並把 ART_VER 加 1。
  */
-const CN_FONT = 'LXGWWenKaiTC-Regular'
-const cn = (size) => new Font(CN_FONT, size)
+const GLYPH_SET = '今日支出　今天記了筆還沒有帳本月剩超出在這裡走足跡離線摳手一年前的花 0123456789$,.km'
 /** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
 const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
@@ -143,6 +143,83 @@ function text(stack, s, size, color, font) {
   return t
 }
 
+// ── 手寫中文字：把 glyphs.json 裡的字形畫成圖片 ──
+let GLYPHS = undefined
+async function loadGlyphs() {
+  if (GLYPHS !== undefined) return GLYPHS
+  GLYPHS = null
+  const fm = FileManager.local()
+  const file = fm.joinPath(fm.documentsDirectory(), `ledger-art-v${ART_VER}-glyphs.json`)
+  try {
+    if (fm.fileExists(file)) GLYPHS = JSON.parse(fm.readString(file))
+    else {
+      const req = new Request(`${APP_URL}widget/glyphs.json?v=${ART_VER}`)
+      req.timeoutInterval = 10
+      const txt = await req.loadString()
+      if (req.response.statusCode !== 200) throw new Error(String(req.response.statusCode))
+      GLYPHS = JSON.parse(txt)
+      fm.writeString(file, txt)
+    }
+  } catch {
+    GLYPHS = null
+  }
+  return GLYPHS
+}
+
+/** 把一行字畫成圖片（字形座標：1 em＝g.em 單位，y 往上；每個輪廓 M 開頭，後面是相對前一點的位移） */
+function glyphImage(str, size, color, G) {
+  const k = size / G.em
+  const chars = [...str]
+  const width = Math.max(1, chars.reduce((w, ch) => w + G.g[ch][0], 0) * k)
+  const h = size * 1.28
+  const base = size * 1.0
+  const dc = canvas(Math.ceil(width) + 1, Math.ceil(h))
+  dc.setFillColor(color)
+  let pen = 0
+  for (const ch of chars) {
+    const [adv, d] = G.g[ch]
+    if (d) {
+      const path = new Path()
+      const tok = d.match(/M|-?\d+/g)
+      let x = 0
+      let y = 0
+      let first = true
+      for (let i = 0; i < tok.length; ) {
+        if (tok[i] === 'M') {
+          if (!first) path.closeSubpath()
+          first = true
+          i++
+          continue
+        }
+        x += +tok[i]
+        y += +tok[i + 1]
+        i += 2
+        const p = new Point((pen + x) * k, base - y * k)
+        if (first) path.move(p)
+        else path.addLine(p)
+        first = false
+      }
+      path.closeSubpath()
+      dc.addPath(path)
+      dc.fillPath()
+    }
+    pen += adv
+  }
+  return { image: dc.getImage(), size: new Size(Math.ceil(width) + 1, Math.ceil(h)) }
+}
+
+/** 手寫中文：字都在 glyphs.json 裡就畫成圖片，否則用系統字 */
+async function cnText(stack, str, size, color) {
+  const G = await loadGlyphs()
+  if (G && [...str].every((ch) => G.g[ch])) {
+    const { image, size: sz } = glyphImage(str, size, color, G)
+    const img = stack.addImage(image)
+    img.imageSize = sz
+    return img
+  }
+  return text(stack, str, size, color, Font.systemFont(size))
+}
+
 /**
  * 腳底板腳印 👣：兩隻赤腳（左腳在左上、右腳在右下，稍微往外撇）。
  * 腳掌是一整塊平滑輪廓（前寬、內側足弓凹、腳跟圓），上面五根腳趾排成弧形，大拇趾最大在內側。
@@ -198,7 +275,7 @@ function footprints(size, color) {
 }
 
 /** SF Symbols 小圖示＋文字（symbol 為 'footprints' 時用自己畫的腳印） */
-function iconText(stack, symbol, s, size, color) {
+async function iconText(stack, symbol, s, size, color) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.centerAlignContent()
@@ -267,21 +344,6 @@ function distanceM(a, b) {
 /** 今天有沒有離開起點 200 公尺以上（沒有就不畫路線，改顯示文字） */
 function moved(route) {
   return (route || []).some((p) => distanceM(route[0], p) > 200)
-}
-
-/** 目前所在的地名（用 iPhone 內建的地名查詢）；查不到用最後一筆紀錄的地名 */
-async function placeName(d) {
-  const last = d.route && d.route[d.route.length - 1]
-  if (last) {
-    try {
-      const r = (await Location.reverseGeocode(last[0], last[1], 'zh_TW'))[0]
-      const name = [r.subLocality, r.locality].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' · ')
-      if (name) return name
-    } catch {
-      /* 查不到就用紀錄的地名 */
-    }
-  }
-  return d.lastPlace ? d.lastPlace.name : ''
 }
 
 // ── 路線縮圖的底圖：OpenStreetMap 圖磚（跟 App 的「OSM 奶茶」一樣，再蓋一層奶茶色） ──
@@ -753,7 +815,7 @@ function blurryRoute(dc, pts) {
 }
 
 /** 右下角的地名小紙片：撕邊的舊紙＋淡淡的影子（畫在卡片底圖上） */
-const TAG = { w: 82, h: 30, right: 5, bottom: 5 }
+const TAG = { w: 82, h: 30, right: 11, bottom: 10 }
 function drawTag(dc) {
   const { w, h } = CARD
   const x0 = w - TAG.right - TAG.w
@@ -807,6 +869,9 @@ async function cardBackground(view) {
     }))
   }
   await ageMap(dc, 0, 0, w, h)
+  // 撕邊框（外面是背景紙的同一塊，邊緣焦黃、捲角）
+  const frame = await loadArt('mapframe.png')
+  if (frame) dc.drawImageInRect(frame, new Rect(0, 0, w, h))
   const mag = await loadArt('magnifier.png')
   if (mag) dc.drawImageInRect(mag, new Rect(0, 0, w, h))
   drawTag(dc)
@@ -841,10 +906,10 @@ async function errorWidget(msg) {
   const w = new ListWidget()
   await paintBg(w, config.widgetFamily === 'small' ? 'small' : 'medium')
   w.setPadding(18, 20, 18, 20)
-  text(w, '摳摳手帳', 14, C.primary, cn(14))
+  await cnText(w, '摳摳手帳', 14, C.primary)
   w.addSpacer(6)
   const t = w.addText(msg)
-  t.font = cn(11)
+  t.font = Font.systemFont(11)
   t.textColor = C.sub
   return w
 }
@@ -862,13 +927,13 @@ function headerRows(stack) {
 }
 
 /** 金額下面的小字：今日支出・今天幾筆 */
-function countLine(stack, d) {
+async function countLine(stack, d) {
   const n = d.todayCount || 0
-  text(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 10, C.sub, cn(10))
+  await cnText(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 10, C.sub)
 }
 
 /** 本月：分隔線（或預算進度線）＋金額 */
-function monthBlock(stack, d, width, showLeft = true) {
+async function monthBlock(stack, d, width, showLeft = true) {
   if (BUDGET > 0) {
     const img = stack.addImage(budgetLine(width, d.monthExpense))
     img.imageSize = new Size(width, 7)
@@ -880,53 +945,50 @@ function monthBlock(stack, d, width, showLeft = true) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.bottomAlignContent()
-  text(row, '本月', 11, C.sub, cn(11))
+  await cnText(row, '本月', 11, C.sub)
   row.addSpacer(5)
   text(row, money(d.monthExpense), 14, C.text, script(14))
   if (BUDGET > 0 && showLeft) {
     row.addSpacer()
     const left = BUDGET - d.monthExpense
-    text(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 11, left >= 0 ? C.sub : C.over, cn(11))
+    await cnText(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 11, left >= 0 ? C.sub : C.over)
   }
 }
 
 /** 最下面一列：步數、最後定位時間、離線 */
-function infoRow(stack, d, stale) {
+async function infoRow(stack, d, stale) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.centerAlignContent()
   let any = false
   if (d.steps != null) {
-    iconText(row, 'footprints', d.steps.toLocaleString('en-US'), 10, C.sub)
+    await iconText(row, 'footprints', d.steps.toLocaleString('en-US'), 10, C.sub)
     any = true
   }
   if (d.lastTime) {
     if (any) row.addSpacer(9)
-    iconText(row, 'location', hm(d.lastTime), 10, C.sub)
+    await iconText(row, 'location', hm(d.lastTime), 10, C.sub)
     any = true
   }
   if (stale) {
     if (any) row.addSpacer(9)
-    iconText(row, 'wifi.slash', '離線', 10, C.over)
+    await iconText(row, 'wifi.slash', '離線', 10, C.over)
   }
 }
 
-/** 右邊地圖卡片：模糊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置；沒有點＝台灣），右下角紙片寫地名或距離 */
+/** 右邊地圖卡片：模糊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置；沒有點＝台灣），右下角紙片寫距離或「在這裡」 */
 async function rightCard(row, d) {
   const route = d.route || []
   const view = mapView(route)
-  let top = '今天'
+  // 不寫地名（地名的字不在手寫字形裡）
+  const top = '今天'
   let main = '還沒有足跡'
   if (view.route) main = `走了 ${routeKm(route).toFixed(1)} km`
-  else if (view.pin) {
-    top = '今天在'
-    main = (await placeName(d)) || '同一個地方'
-  }
+  else if (view.pin) main = '在這裡'
   const { cx, cy, r } = LENS
   const card = row.addStack()
   card.size = new Size(CARD.w, CARD.h)
-  card.cornerRadius = 14
-  card.backgroundImage = await cardBackground(view)
+  card.backgroundImage = await cardBackground(view) // 方形卡片，撕邊效果畫在圖裡
   card.layoutVertically()
   card.addSpacer(cy - r)
   const lensRow = card.addStack()
@@ -944,8 +1006,8 @@ async function rightCard(row, d) {
   cap.layoutVertically()
   cap.size = new Size(TAG.w, TAG.h)
   cap.setPadding(3, 7, 3, 6)
-  text(cap, top, 9, C.faint, cn(9))
-  text(cap, main, 11, C.text, cn(11))
+  await cnText(cap, top, 9, C.faint)
+  await cnText(cap, main, 12, C.text)
   capRow.addSpacer(TAG.right)
   card.addSpacer(TAG.bottom)
 }
@@ -962,11 +1024,11 @@ async function mediumWidget(d, stale) {
   left.size = new Size(150, 130)
   headerRows(left)
   text(left, money(d.todayExpense), 30, C.text, script(30))
-  countLine(left, d)
+  await countLine(left, d)
   left.addSpacer()
-  monthBlock(left, d, 150)
+  await monthBlock(left, d, 150)
   left.addSpacer(5)
-  infoRow(left, d, stale)
+  await infoRow(left, d, stale)
   row.addSpacer()
   await rightCard(row, d)
   return w
@@ -978,11 +1040,11 @@ async function smallWidget(d, stale) {
   w.setPadding(18, 20, 16, 20)
   headerRows(w)
   text(w, money(d.todayExpense), 28, C.text, script(28))
-  countLine(w, d)
+  await countLine(w, d)
   w.addSpacer()
-  monthBlock(w, d, 118, false)
+  await monthBlock(w, d, 118, false)
   w.addSpacer(5)
-  infoRow(w, d, stale)
+  await infoRow(w, d, stale)
   return w
 }
 
@@ -1001,15 +1063,15 @@ async function yearAgoWidget(d) {
   }
   const fg = photo ? Color.white() : C.text
   const sub = photo ? new Color('#FFFFFF', 0.85) : C.sub
-  text(w, '一年前的今天', 12, photo ? Color.white() : C.primary, cn(12))
-  text(w, ya.date.replace(/^(\d+)-(\d+)-(\d+)$/, (_, y, m, dd) => `${y}年${+m}月${+dd}日`), 10, sub)
+  await cnText(w, '一年前的今天', 12, photo ? Color.white() : C.primary)
+  await cnText(w, ya.date.replace(/^(\d+)-(\d+)-(\d+)$/, (_, y, m, dd) => `${y}年${+m}月${+dd}日`), 10, sub)
   w.addSpacer()
   const line = ya.summary || ya.notes[0]?.note || ya.notes[0]?.title || (ya.count ? `${ya.count} 則紀錄` : '這天沒有紀錄')
   const t = w.addText(line)
-  t.font = cn(13)
+  t.font = Font.mediumSystemFont(13)
   t.textColor = fg
   t.lineLimit = 3
-  if (ya.expense > 0) text(w, `花了 ${money(ya.expense)}`, 10, sub)
+  if (ya.expense > 0) await cnText(w, `花了 ${money(ya.expense)}`, 10, sub)
   return w
 }
 
