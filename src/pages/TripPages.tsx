@@ -24,6 +24,8 @@ import { goBack, navigate, useLiveQuery, useObjectUrl } from '../lib/hooks'
 import { getSyncStatus, loadDisplay, missingTables, onSyncStatus } from '../lib/sync'
 import { isDateKey, shiftDate, toDateKey } from '../lib/ledger'
 import { canRecordVideo, recordVideo, renderPoster, type PosterBasemap, type PosterInput, type PosterRatio, type VideoPhotoSrc, type VideoResult } from '../lib/poster'
+import { drawnDayRoute } from '../lib/dayRoute'
+import { onRouteSettingsChange } from '../lib/snap'
 import { estimateVideoBytes, planVideo, videoBitrate } from '../lib/posterTimeline'
 import { formatBytes } from '../lib/usage'
 import {
@@ -507,11 +509,41 @@ function TripEdit({ id, start: s0, end: e0, name: n0 }: { id: string | null; sta
 
 // ── 旅程地圖 ──
 
+/**
+ * 每天在地圖頁上畫的路線（手繪修改、手動切段、交通方式、貼齊道路都算進去）；
+ * 還在算時 ready＝false，沒有背景定位移動的日子不在 routes 裡（照舊用紀錄連線）。
+ */
+function useDrawnRoutes(dates: string[] | undefined): { routes: Record<string, GeoPoint[]>; ready: boolean } {
+  const [st, setSt] = useState<{ key: string; routes: Record<string, GeoPoint[]> } | null>(null)
+  const [tick, setTick] = useState(0)
+  useEffect(() => onRouteSettingsChange(() => setTick((t) => t + 1)), [])
+  const key = dates?.join(',') ?? ''
+  useEffect(() => {
+    if (!dates) return
+    let alive = true
+    ;(async () => {
+      const routes: Record<string, GeoPoint[]> = {}
+      for (const d of dates) {
+        const r = await drawnDayRoute(d).catch(() => null)
+        if (r && r.length > 1) routes[d] = r
+      }
+      if (alive) setSt({ key, routes })
+    })()
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, tick])
+  // 同一份結果回傳同一個物件，用它的 useMemo 才不會每次重算
+  return useMemo(() => ({ routes: st?.routes ?? {}, ready: !!st && st.key === key }), [st, key])
+}
+
 function TripDetail({ id }: { id: string }) {
   const data = useLiveQuery(async () => {
     const trip = await getTrip(id)
     return trip ? { trip, summary: await loadSummary(trip) } : null
   }, [id])
+  const drawn = useDrawnRoutes(data?.summary.days.map((d) => d.date))
   if (data === null) {
     return (
       <div className="page no-tabbar">
@@ -523,7 +555,9 @@ function TripDetail({ id }: { id: string }) {
     )
   }
   if (!data) return <div className="page no-tabbar" />
-  const { trip, summary } = data
+  const { trip } = data
+  // 路線換成地圖頁上畫的（改過的路線也用上）
+  const summary = { ...data.summary, days: data.summary.days.map((d) => ({ ...d, route: drawn.routes[d.date] ?? d.route })) }
   const first = summary.days.find((d) => d.route.length)?.route[0]
   const markers: MapMarker[] = first ? [{ id: 'start', lat: first.lat, lng: first.lng, kind: 'start', label: '起點' }] : []
   const maxDay = Math.max(...summary.days.map((d) => d.expense), 1)
@@ -632,6 +666,8 @@ function PosterPage({ id }: { id: string }) {
     const trip = await getTrip(id)
     return trip ? { trip, summary: await loadSummary(trip) } : null
   }, [id])
+  // 路線用地圖頁上畫的（手繪修改、切段、交通方式、貼齊道路）；算好之前先不產生
+  const drawn = useDrawnRoutes(data?.summary.days.map((d) => d.date))
   const [mode, setMode] = useState<PosterMode>('image')
   const [imageRatio, setImageRatio] = useState<PosterRatio>('4:5')
   const [videoRatio, setVideoRatio] = useState<PosterRatio>('9:16')
@@ -657,7 +693,7 @@ function PosterPage({ id }: { id: string }) {
   const setRatio = mode === 'image' ? setImageRatio : setVideoRatio
 
   const input = useMemo((): PosterInput | null => {
-    if (!data) return null
+    if (!data || !drawn.ready) return null
     const { trip, summary } = data
     return {
       name: trip.name,
@@ -666,7 +702,7 @@ function PosterPage({ id }: { id: string }) {
       days: summary.days.map((d) => ({
         color: d.color,
         dashed: d.dashed,
-        route: d.route,
+        route: drawn.routes[d.date] ?? d.route,
         landmark: d.landmark,
         label: `Day ${d.index + 1} · ${d.title || `${Number(d.date.slice(5, 7))}/${Number(d.date.slice(8))}`}`,
         km: d.km,
@@ -681,7 +717,7 @@ function PosterPage({ id }: { id: string }) {
       showNames,
       showCredit,
     }
-  }, [data, ratio, basemap, showMoney, showNames, showCredit])
+  }, [data, drawn, ratio, basemap, showMoney, showNames, showCredit])
 
   const fellBack = (used: PosterBasemap) => {
     if (used === basemap) return
@@ -811,7 +847,7 @@ function PosterPage({ id }: { id: string }) {
           url && !isRecording && <img src={url} alt={`${name}旅遊軌跡圖預覽`} />
         )}
         <div ref={liveRef} className="live" />
-        {(busy || (isRecording && recording === 0)) && <span className="spinner" />}
+        {(busy || !drawn.ready || (isRecording && recording === 0)) && <span className="spinner" />}
       </div>
 
       <section className="card stack poster-options">
@@ -910,7 +946,7 @@ function PosterPage({ id }: { id: string }) {
         </>
       ) : (
         <>
-          <button className="btn-primary" disabled={busy} onClick={record}>
+          <button className="btn-primary" disabled={busy || !input} onClick={record}>
             <Icon name="camera" size={20} />
             {length === 'auto' ? '錄製影片（依照片張數決定長度）' : `錄製影片（約 ${length} 秒）`}
           </button>
