@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.6
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.7
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -31,6 +31,12 @@ const ART_VER = 4
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
+/**
+ * 中文手寫字體：霞鶩文楷 TC（LXGW WenKai TC，OFL 免費授權）。要另外裝在 iPhone 上；
+ * 沒裝或 Scriptable 抓不到時，iOS 會自動改用系統字，不會壞掉。
+ */
+const CN_FONT = 'LXGWWenKaiTC-Regular'
+const cn = (size) => new Font(CN_FONT, size)
 /** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
 const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
@@ -137,11 +143,39 @@ function text(stack, s, size, color, font) {
   return t
 }
 
-/** SF Symbols 小圖示＋文字 */
+/** 腳底板腳印 👣（兩隻赤腳，一前一後；iPhone 內建圖示只有鞋印，所以自己畫） */
+function footprints(size, color) {
+  const dc = canvas(size, size)
+  const s = size / 24
+  const foot = (x, y, flip) => {
+    const e = (cx, cy, rx, ry) => {
+      dc.setFillColor(color)
+      dc.fillEllipse(new Rect((x + (flip ? -cx : cx) - rx) * s, (y + cy - ry) * s, rx * 2 * s, ry * 2 * s))
+    }
+    e(0, 5.2, 2.6, 2.4) // 腳跟
+    e(flip ? 0.3 : -0.3, 1.2, 3.1, 3.2) // 腳掌
+    e(0.9, 3.4, 2.2, 2.6) // 足弓外側
+    // 五根腳趾（大拇趾最大，往外變小）
+    const toes = [[-2.2, -3.4, 1.25], [-0.4, -4.1, 0.95], [1.1, -3.9, 0.85], [2.4, -3.2, 0.75], [3.4, -2.2, 0.65]]
+    for (const [tx, ty, r] of toes) e(tx, ty, r, r * 1.1)
+  }
+  foot(7, 13.5, false)
+  foot(16.5, 8, true)
+  return dc.getImage()
+}
+
+/** SF Symbols 小圖示＋文字（symbol 為 'footprints' 時用自己畫的腳印） */
 function iconText(stack, symbol, s, size, color) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.centerAlignContent()
+  if (symbol === 'footprints') {
+    const img = row.addImage(footprints(size + 5, color))
+    img.imageSize = new Size(size + 5, size + 5)
+    row.addSpacer(3)
+    text(row, s, size, color, serif(size + 1, 'Regular'))
+    return row
+  }
   const sym = SFSymbol.named(symbol)
   if (sym) {
     sym.applyFont(Font.lightSystemFont(size))
@@ -774,10 +808,10 @@ async function errorWidget(msg) {
   const w = new ListWidget()
   await paintBg(w, config.widgetFamily === 'small' ? 'small' : 'medium')
   w.setPadding(18, 20, 18, 20)
-  text(w, '摳摳手帳', 13, C.primary, Font.semiboldSystemFont(13))
+  text(w, '摳摳手帳', 14, C.primary, cn(14))
   w.addSpacer(6)
   const t = w.addText(msg)
-  t.font = Font.systemFont(11)
+  t.font = cn(11)
   t.textColor = C.sub
   return w
 }
@@ -797,7 +831,7 @@ function headerRows(stack) {
 /** 金額下面的小字：今日支出・今天幾筆 */
 function countLine(stack, d) {
   const n = d.todayCount || 0
-  text(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 9, C.sub, Font.lightSystemFont(9))
+  text(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 10, C.sub, cn(10))
 }
 
 /** 本月：分隔線（或預算進度線）＋金額 */
@@ -813,13 +847,13 @@ function monthBlock(stack, d, width, showLeft = true) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.bottomAlignContent()
-  text(row, '本月', 10, C.sub, Font.lightSystemFont(10))
+  text(row, '本月', 11, C.sub, cn(11))
   row.addSpacer(5)
   text(row, money(d.monthExpense), 14, C.text, script(14))
   if (BUDGET > 0 && showLeft) {
     row.addSpacer()
     const left = BUDGET - d.monthExpense
-    text(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 10, left >= 0 ? C.sub : C.over, Font.lightSystemFont(10))
+    text(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 11, left >= 0 ? C.sub : C.over, cn(11))
   }
 }
 
@@ -830,7 +864,7 @@ function infoRow(stack, d, stale) {
   row.centerAlignContent()
   let any = false
   if (d.steps != null) {
-    iconText(row, 'shoeprints.fill', d.steps.toLocaleString('en-US'), 10, C.sub)
+    iconText(row, 'footprints', d.steps.toLocaleString('en-US'), 10, C.sub)
     any = true
   }
   if (d.lastTime) {
@@ -877,8 +911,8 @@ async function rightCard(row, d) {
   cap.layoutVertically()
   cap.size = new Size(TAG.w, TAG.h)
   cap.setPadding(3, 7, 3, 6)
-  text(cap, top, 8, C.faint, Font.lightSystemFont(8))
-  text(cap, main, 10, C.text, Font.mediumSystemFont(10))
+  text(cap, top, 9, C.faint, cn(9))
+  text(cap, main, 11, C.text, cn(11))
   capRow.addSpacer(TAG.right)
   card.addSpacer(TAG.bottom)
 }
@@ -934,12 +968,12 @@ async function yearAgoWidget(d) {
   }
   const fg = photo ? Color.white() : C.text
   const sub = photo ? new Color('#FFFFFF', 0.85) : C.sub
-  text(w, '一年前的今天', 11, photo ? Color.white() : C.primary, Font.semiboldSystemFont(11))
+  text(w, '一年前的今天', 12, photo ? Color.white() : C.primary, cn(12))
   text(w, ya.date.replace(/^(\d+)-(\d+)-(\d+)$/, (_, y, m, dd) => `${y}年${+m}月${+dd}日`), 10, sub)
   w.addSpacer()
   const line = ya.summary || ya.notes[0]?.note || ya.notes[0]?.title || (ya.count ? `${ya.count} 則紀錄` : '這天沒有紀錄')
   const t = w.addText(line)
-  t.font = Font.mediumSystemFont(13)
+  t.font = cn(13)
   t.textColor = fg
   t.lineLimit = 3
   if (ya.expense > 0) text(w, `花了 ${money(ya.expense)}`, 10, sub)
