@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.7
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.8
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -143,24 +143,57 @@ function text(stack, s, size, color, font) {
   return t
 }
 
-/** 腳底板腳印 👣（兩隻赤腳，一前一後；iPhone 內建圖示只有鞋印，所以自己畫） */
+/**
+ * 腳底板腳印 👣：兩隻赤腳（左腳在左上、右腳在右下，稍微往外撇）。
+ * 腳掌是一整塊平滑輪廓（前寬、內側足弓凹、腳跟圓），上面五根腳趾排成弧形，大拇趾最大在內側。
+ */
 function footprints(size, color) {
   const dc = canvas(size, size)
-  const s = size / 24
-  const foot = (x, y, flip) => {
-    const e = (cx, cy, rx, ry) => {
-      dc.setFillColor(color)
-      dc.fillEllipse(new Rect((x + (flip ? -cx : cx) - rx) * s, (y + cy - ry) * s, rx * 2 * s, ry * 2 * s))
+  dc.setFillColor(color)
+  // 左腳的形狀（單位座標：寬約 1、長約 2.2，往上是腳趾）
+  const SOLE = [
+    [0.08, 0.45],
+    [[0.06, 0.12], [0.3, -0.02], [0.56, 0.0]],
+    [[0.84, 0.02], [1.04, 0.2], [1.0, 0.5]],
+    [[0.96, 0.85], [0.64, 0.95], [0.66, 1.4]], // 內側足弓往內凹
+    [[0.68, 1.85], [0.78, 2.22], [0.46, 2.22]],
+    [[0.16, 2.22], [0.14, 1.9], [0.2, 1.6]],
+    [[0.26, 1.2], [0.02, 0.9], [0.08, 0.45]],
+  ]
+  const TOES = [
+    [0.02, 0.12, 0.085],
+    [0.17, -0.07, 0.1],
+    [0.36, -0.2, 0.11],
+    [0.6, -0.27, 0.13],
+    [0.9, -0.24, 0.175],
+  ]
+  const foot = (cx, cy, scale, angle, mirror) => {
+    const ca = Math.cos(angle)
+    const sa = Math.sin(angle)
+    // 以腳的中心（0.5, 1.0）為原點旋轉、縮放、移到 (cx, cy)
+    const P = (x, y) => {
+      const u = (mirror ? 0.5 - (x - 0.5) : x) - 0.5
+      const v = y - 1.0
+      return new Point(cx + (u * ca - v * sa) * scale, cy + (u * sa + v * ca) * scale)
     }
-    e(0, 5.2, 2.6, 2.4) // 腳跟
-    e(flip ? 0.3 : -0.3, 1.2, 3.1, 3.2) // 腳掌
-    e(0.9, 3.4, 2.2, 2.6) // 足弓外側
-    // 五根腳趾（大拇趾最大，往外變小）
-    const toes = [[-2.2, -3.4, 1.25], [-0.4, -4.1, 0.95], [1.1, -3.9, 0.85], [2.4, -3.2, 0.75], [3.4, -2.2, 0.65]]
-    for (const [tx, ty, r] of toes) e(tx, ty, r, r * 1.1)
+    const path = new Path()
+    path.move(P(...SOLE[0]))
+    for (let i = 1; i < SOLE.length; i++) {
+      const [c1, c2, e] = SOLE[i]
+      path.addCurve(P(...e), P(...c1), P(...c2))
+    }
+    path.closeSubpath()
+    dc.addPath(path)
+    dc.fillPath()
+    for (const [x, y, r] of TOES) {
+      const c = P(x, y)
+      const rr = r * scale
+      dc.fillEllipse(new Rect(c.x - rr, c.y - rr * 1.08, rr * 2, rr * 2.16))
+    }
   }
-  foot(7, 13.5, false)
-  foot(16.5, 8, true)
+  const k = size / 24
+  foot(7.4 * k, 9.6 * k, 5.3 * k, -0.3, false) // 左腳，左上
+  foot(16.6 * k, 14.6 * k, 5.3 * k, 0.3, true) // 右腳，右下
   return dc.getImage()
 }
 
@@ -170,8 +203,8 @@ function iconText(stack, symbol, s, size, color) {
   row.layoutHorizontally()
   row.centerAlignContent()
   if (symbol === 'footprints') {
-    const img = row.addImage(footprints(size + 5, color))
-    img.imageSize = new Size(size + 5, size + 5)
+    const img = row.addImage(footprints(size + 7, color))
+    img.imageSize = new Size(size + 7, size + 7)
     row.addSpacer(3)
     text(row, s, size, color, serif(size + 1, 'Regular'))
     return row
