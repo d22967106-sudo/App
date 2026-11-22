@@ -322,6 +322,13 @@ export async function getSnapCache(points: TrackPoint[], mode: TravelMode): Prom
   return hit && 'pts' in hit ? hit.pts.map(([lat, lng]) => ({ lat, lng })) : null
 }
 
+/** 只看快取的貼齊結果（不連網；旅程列表的小縮圖用） */
+export async function snapLegCached(points: TrackPoint[], mode: TravelMode): Promise<GeoPoint[] | null> {
+  if (mode === 'none' || points.length < 2) return null
+  const hit = await getMeta<Cached>(`snap3.${mode}.${hashPoints(points)}`)
+  return hit && 'pts' in hit ? tidySnapped(hit.pts.map(([lat, lng]) => ({ lat, lng })), points) : null
+}
+
 /**
  * 一段移動貼齊道路後的路線；不貼齊（none）、沒網路、失敗或結果不合理（比原本長太多）都回傳 null。
  * fetcher 給測試用。

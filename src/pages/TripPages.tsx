@@ -113,7 +113,14 @@ function MiniRoute({ summary, size = 92 }: { summary: TripSummary; size?: number
 function TripList() {
   const trips = useLiveQuery(async () => {
     const list = await getAllTrips()
-    return Promise.all(list.map(async (trip) => ({ trip, summary: await loadSummary(trip) })))
+    return Promise.all(
+      list.map(async (trip) => {
+        const summary = await loadSummary(trip)
+        // 小縮圖也用改過的路線（貼齊道路只用存過的結果，不為了縮圖連網）
+        const days = await Promise.all(summary.days.map(async (d) => ({ ...d, route: (await drawnDayRoute(d.date, { offline: true }).catch(() => null)) ?? d.route })))
+        return { trip, summary: { ...summary, days } }
+      }),
+    )
   }, [])
   const [dismissed, setDismissed] = useState<string[] | null>(null)
   useEffect(() => {
