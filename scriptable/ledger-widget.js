@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.3
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.4
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -11,7 +11,7 @@ const KEY = '__KEY__'
 const BUDGET = __BUDGET__ // 每月預算（新台幣），0 表示不顯示預算
 const APP_URL = '__APP_URL__'
 
-// ── 復古紙張風：米灰舊紙、焦褐燒邊、深咖啡色字、襯線字；地圖用放大鏡 ──
+// ── 復古紙張風：米灰舊紙、焦褐燒邊、深咖啡色字、草寫體數字；地圖用放大鏡 ──
 const C = {
   paper: new Color('#C9BBA2'),
   card: new Color('#EFE5D3'),
@@ -26,15 +26,18 @@ const C = {
   tile: new Color('#D9C9AC'),
 }
 
-/** 背景紙張圖（App 網站上的 widget/paper-*.jpg，下載一次存在手機上；換圖時把版本加 1） */
-const PAPER_VER = 1
+/** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
+const ART_VER = 2
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
+/** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
+const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
 const WEEK_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const dayLabel = (d = new Date()) => `${MONTH_EN[d.getMonth()]}. ${d.getDate()}  ·  ${WEEK_EN[d.getDay()]}`
+const WEEK_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const dayLabel = (d = new Date()) => `${WEEK_FULL[d.getDay()]}, ${MONTH_EN[d.getMonth()]} ${d.getDate()}`
 
 /** 畫布（透明、跟螢幕倍率一樣清楚） */
 function canvas(w, h) {
@@ -75,15 +78,15 @@ function backgroundArt(w, h) {
   return dc.getImage()
 }
 
-async function loadPaper(kind) {
+async function loadArt(name) {
   const fm = FileManager.local()
-  const file = fm.joinPath(fm.documentsDirectory(), `ledger-paper-v${PAPER_VER}-${kind}.jpg`)
+  const file = fm.joinPath(fm.documentsDirectory(), `ledger-art-v${ART_VER}-${name}`)
   if (fm.fileExists(file)) {
     const img = fm.readImage(file)
     if (img) return img
   }
   try {
-    const req = new Request(`${APP_URL}widget/paper-${kind}.jpg?v=${PAPER_VER}`)
+    const req = new Request(`${APP_URL}widget/${name}?v=${ART_VER}`)
     req.timeoutInterval = 10
     const img = await req.loadImage()
     if (req.response.statusCode !== 200) throw new Error(String(req.response.statusCode))
@@ -97,7 +100,7 @@ async function loadPaper(kind) {
 /** 把紙張背景放上小工具（kind：medium／small） */
 async function paintBg(w, kind) {
   const size = kind === 'small' ? new Size(158, 158) : new Size(338, 158)
-  w.backgroundImage = (await loadPaper(kind)) || backgroundArt(size.width, size.height)
+  w.backgroundImage = (await loadArt(`paper-${kind}.jpg`)) || backgroundArt(size.width, size.height)
 }
 
 /** 細細一條分隔線 */
@@ -274,14 +277,18 @@ function drawPin(dc, pt) {
   circle(dc, pt.x, pt.y, 3.8, new Color('#8E3B1C'))
 }
 
-// ── 地圖卡片：模糊的舊地圖上放一支放大鏡，鏡片裡是清楚的地圖 ──
+// ── 地圖卡片：模糊的地圖上放一支放大鏡，鏡片裡是清楚的地圖 ──
+// 放大鏡圖（magnifier.png）跟卡片一樣大，位置要跟 make-widget-art.py 的 CARD、LENS 一樣
 const CARD = { w: 140, h: 132 }
-const LENS = { cx: 80, cy: 55, r: 44, rim: 5 }
+const LENS = { cx: 80, cy: 55, r: 38 } // r＝鏡片（玻璃）半徑，比挖空的洞大 1 點，蓋住接縫
+/** 完全沒有定位時，放大鏡下放一張台灣地圖 */
+const DEFAULT_VIEW = { center: [23.75, 120.95], z: 7, route: null, pin: false }
 
 /** 地圖要看哪裡：中心點、鏡片裡的縮放層級、路線 */
 function mapView(route) {
+  if (!route.length) return DEFAULT_VIEW
   if (moved(route)) {
-    const inner = (LENS.r - LENS.rim) * 2 - 18
+    const inner = LENS.r * 2 - 18
     let z = 17
     let px
     for (; z >= 3; z--) {
@@ -292,109 +299,112 @@ function mapView(route) {
     }
     const lats = route.map((p) => p[0])
     const lngs = route.map((p) => p[1])
-    return { center: [(Math.max(...lats) + Math.min(...lats)) / 2, (Math.max(...lngs) + Math.min(...lngs)) / 2], z, route }
+    return { center: [(Math.max(...lats) + Math.min(...lats)) / 2, (Math.max(...lngs) + Math.min(...lngs)) / 2], z, route, pin: true }
   }
-  return { center: route[route.length - 1], z: 16, route: null }
+  return { center: route[route.length - 1], z: 16, route: null, pin: true }
 }
 
-/** 卡片底圖：模糊的舊地圖（用低 3 層的圖磚放大 8 倍，自然就糊了）＋鏡片陰影＋木頭把手 */
+/** 舊地圖色調：泛黃、降低飽和 */
+function ageMap(dc, w, h, strength = 1) {
+  dc.setFillColor(new Color('#C8AF86', 0.42 * strength))
+  dc.fillRect(new Rect(0, 0, w, h))
+  dc.setFillColor(new Color('#4A2E16', 0.07 * strength))
+  dc.fillRect(new Rect(0, 0, w, h))
+}
+
+/** 右下角的地名小紙片：撕邊的舊紙＋淡淡的影子（畫在卡片底圖上） */
+const TAG = { w: 82, h: 30, right: 5, bottom: 5 }
+function drawTag(dc) {
+  const { w, h } = CARD
+  const x0 = w - TAG.right - TAG.w
+  const y0 = h - TAG.bottom - TAG.h
+  const r = rand(97)
+  const pts = []
+  // 上下兩邊撕得不規則，左右直的
+  for (let x = 0; x <= TAG.w; x += 3) pts.push(new Point(x0 + x, y0 + r() * 1.8))
+  for (let x = TAG.w; x >= 0; x -= 3) pts.push(new Point(x0 + x, y0 + TAG.h - r() * 1.8))
+  const shadow = new Path()
+  shadow.addLines(pts.map((p) => new Point(p.x + 1.2, p.y + 1.8)))
+  shadow.closeSubpath()
+  dc.addPath(shadow)
+  dc.setFillColor(new Color('#2A1A0E', 0.25))
+  dc.fillPath()
+  const tag = new Path()
+  tag.addLines(pts)
+  tag.closeSubpath()
+  dc.addPath(tag)
+  dc.setFillColor(new Color('#E4D6BA'))
+  dc.fillPath()
+  // 紙片上的斑點與邊緣泛黃
+  for (let i = 0; i < 14; i++) circle(dc, x0 + r() * TAG.w, y0 + r() * TAG.h, 0.5 + r() * 1.2, new Color('#8A6236', 0.08 + r() * 0.08))
+  dc.addPath(tag)
+  dc.setStrokeColor(new Color('#9C7A52', 0.55))
+  dc.setLineWidth(0.6)
+  dc.strokePath()
+}
+
+/** 卡片底圖：模糊的地圖（用低 4 層的圖磚放大 16 倍，自然就糊了）＋舊地圖色調＋放大鏡＋地名紙片 */
 async function cardBackground(view) {
   const { w, h } = CARD
-  const { cx, cy, r } = LENS
+  const { cx, cy } = LENS
   const dc = canvas(w, h)
   dc.setFillColor(C.tile)
   dc.fillRect(new Rect(0, 0, w, h))
-  if (view) {
-    const bz = Math.max(1, view.z - 2) // 外面看到的範圍比鏡片大 4 倍
-    const dz = Math.max(0, bz - 3)
-    const ppx = TILE_PT * 2 ** (bz - dz)
-    const q = worldPx(view.center[0], view.center[1], dz)
-    await drawTiles(dc, dz, q.x - cx / ppx, q.y - cy / ppx, w, h, ppx)
-  }
-  // 舊紙色調
-  dc.setFillColor(new Color('#C8AF86', 0.5))
-  dc.fillRect(new Rect(0, 0, w, h))
-  dc.setFillColor(new Color('#4A2E16', 0.08))
-  dc.fillRect(new Rect(0, 0, w, h))
-  // 四周暗一點
-  for (let i = 0; i < 10; i++) {
+  const bz = Math.max(1, view.z - 2) // 外面看到的範圍比鏡片大 4 倍
+  const dz = Math.max(0, bz - 4)
+  const ppx = TILE_PT * 2 ** (bz - dz)
+  const q = worldPx(view.center[0], view.center[1], dz)
+  await drawTiles(dc, dz, q.x - cx / ppx, q.y - cy / ppx, w, h, ppx)
+  ageMap(dc, w, h, 1.15)
+  // 四周暗一點（景深）
+  for (let i = 0; i < 12; i++) {
     const p = new Path()
     p.addRoundedRect(new Rect(i, i, w - i * 2, h - i * 2), 14, 14)
     dc.addPath(p)
-    dc.setStrokeColor(new Color('#3A2412', 0.06 * (1 - i / 10)))
+    dc.setStrokeColor(new Color('#2A1A0E', 0.06 * (1 - i / 12)))
     dc.setLineWidth(1.4)
     dc.strokePath()
   }
-  // 鏡片在地圖上的影子
-  for (let i = 0; i < 6; i++) circle(dc, cx + 4, cy + 6, r + 6 - i, new Color('#2A1A0E', 0.05))
-  // 把手（往左下）：銅環＋深色木柄
-  const ux = -Math.SQRT1_2
-  const uy = Math.SQRT1_2
-  const at = (d) => new Point(cx + ux * d, cy + uy * d)
-  const seg = (d0, d1, width, color) => {
-    const p = new Path()
-    p.move(at(d0))
-    p.addLine(at(d1))
-    dc.addPath(p)
-    dc.setStrokeColor(color)
-    dc.setLineWidth(width)
-    dc.strokePath()
-  }
-  seg(r + 6, r + 50, 10, new Color('#2A1A0E', 0.18)) // 把手的影子
-  seg(r - 2, r + 10, 9, new Color('#8A5E24'))
-  seg(r - 2, r + 10, 3, new Color('#E2B96A', 0.8))
-  seg(r + 10, r + 48, 8, new Color('#3B2414'))
-  seg(r + 10, r + 48, 2, new Color('#7A5236', 0.7))
-  const end = at(r + 48)
-  circle(dc, end.x, end.y, 4, new Color('#3B2414'))
+  const mag = await loadArt('magnifier.png')
+  if (mag) dc.drawImageInRect(mag, new Rect(0, 0, w, h))
+  drawTag(dc)
   return dc.getImage()
 }
 
-/** 鏡片裡：清楚的地圖、路線或目前位置、玻璃的反光與邊緣暗角（外面會被裁成圓形） */
+/** 鏡片裡：清楚的地圖、路線或目前位置，上面蓋玻璃反光（外面會被裁成圓形） */
 async function lensImage(view) {
-  const d = (LENS.r - LENS.rim) * 2
+  const d = LENS.r * 2
   const dc = canvas(d, d)
   dc.setFillColor(C.soft)
   dc.fillRect(new Rect(0, 0, d, d))
-  if (view) {
-    const q = worldPx(view.center[0], view.center[1], view.z)
-    const left = q.x - d / 2 / TILE_PT
-    const top = q.y - d / 2 / TILE_PT
-    await drawTiles(dc, view.z, left, top, d, d)
-    dc.setFillColor(new Color('#E9D6B4', 0.3))
-    dc.fillRect(new Rect(0, 0, d, d))
-    const toPt = (p) => {
-      const w = worldPx(p[0], p[1], view.z)
-      return new Point((w.x - left) * TILE_PT, (w.y - top) * TILE_PT)
-    }
-    if (view.route) {
-      const pts = view.route.map(toPt)
-      const path = new Path()
-      path.addLines(pts)
-      dc.addPath(path)
-      dc.setStrokeColor(new Color('#F6EEDF'))
-      dc.setLineWidth(5)
-      dc.strokePath()
-      dc.addPath(path)
-      dc.setStrokeColor(new Color('#8E3B1C'))
-      dc.setLineWidth(2.5)
-      dc.strokePath()
-      circle(dc, pts[0].x, pts[0].y, 3.5, new Color('#4A2A14'))
-      drawPin(dc, pts[pts.length - 1])
-    } else drawPin(dc, toPt(view.center))
+  // 放大鏡把地圖放大一點：同一層圖磚畫成 1.25 倍
+  const ppx = TILE_PT * 1.25
+  const q = worldPx(view.center[0], view.center[1], view.z)
+  const left = q.x - d / 2 / ppx
+  const top = q.y - d / 2 / ppx
+  await drawTiles(dc, view.z, left, top, d, d, ppx)
+  ageMap(dc, d, d, 0.6)
+  const toPt = (p) => {
+    const w = worldPx(p[0], p[1], view.z)
+    return new Point((w.x - left) * ppx, (w.y - top) * ppx)
   }
-  // 鏡片邊緣暗角
-  for (let i = 0; i < 8; i++) {
-    const p = new Path()
-    p.addEllipse(new Rect(i, i, d - i * 2, d - i * 2))
-    dc.addPath(p)
-    dc.setStrokeColor(new Color('#2A1A0E', 0.07 * (1 - i / 8)))
-    dc.setLineWidth(1.5)
+  if (view.route) {
+    const pts = view.route.map(toPt)
+    const path = new Path()
+    path.addLines(pts)
+    dc.addPath(path)
+    dc.setStrokeColor(new Color('#F6EEDF', 0.9))
+    dc.setLineWidth(5)
     dc.strokePath()
-  }
-  // 玻璃反光（左上）
-  circle(dc, d * 0.34, d * 0.27, d * 0.2, new Color('#FFFFFF', 0.1))
-  circle(dc, d * 0.31, d * 0.24, d * 0.09, new Color('#FFFFFF', 0.16))
+    dc.addPath(path)
+    dc.setStrokeColor(new Color('#8E3B1C'))
+    dc.setLineWidth(2.5)
+    dc.strokePath()
+    circle(dc, pts[0].x, pts[0].y, 3.5, new Color('#4A2A14'))
+    drawPin(dc, pts[pts.length - 1])
+  } else if (view.pin) drawPin(dc, toPt(view.center))
+  const g = await loadArt('glass.png')
+  if (g) dc.drawImageInRect(g, new Rect(0, 0, d, d))
   return dc.getImage()
 }
 
@@ -417,21 +427,19 @@ function routeKm(route) {
   return m / 1000
 }
 
-/** 上面兩行：英文日期（斜體）、今日支出 */
+/** 第一行：草寫英文日期 */
 function headerRows(stack) {
-  text(stack, dayLabel(), 11, C.primary, serif(11, 'Italic'))
-  stack.addSpacer(5)
-  text(stack, '今日支出', 10, C.sub, Font.lightSystemFont(10))
+  text(stack, dayLabel(), 13, C.primary, script(13))
 }
 
-/** 金額下面的小字 */
+/** 金額下面的小字：今日支出・今天幾筆 */
 function countLine(stack, d) {
   const n = d.todayCount || 0
-  text(stack, n ? `今天記了 ${n} 筆` : '今天還沒有記帳', 9, C.faint, Font.lightSystemFont(9))
+  text(stack, n ? `今日支出　今天記了 ${n} 筆` : '今日支出　今天還沒有記帳', 9, C.sub, Font.lightSystemFont(9))
 }
 
 /** 本月：分隔線（或預算進度線）＋金額 */
-function monthBlock(stack, d, width) {
+function monthBlock(stack, d, width, showLeft = true) {
   if (BUDGET > 0) {
     const img = stack.addImage(budgetLine(width, d.monthExpense))
     img.imageSize = new Size(width, 7)
@@ -445,8 +453,8 @@ function monthBlock(stack, d, width) {
   row.bottomAlignContent()
   text(row, '本月', 10, C.sub, Font.lightSystemFont(10))
   row.addSpacer(5)
-  text(row, money(d.monthExpense), 13, C.text, serif(13))
-  if (BUDGET > 0) {
+  text(row, money(d.monthExpense), 14, C.text, script(14))
+  if (BUDGET > 0 && showLeft) {
     row.addSpacer()
     const left = BUDGET - d.monthExpense
     text(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 10, left >= 0 ? C.sub : C.over, Font.lightSystemFont(10))
@@ -474,56 +482,43 @@ function infoRow(stack, d, stale) {
   }
 }
 
-/** 右邊地圖卡片：模糊舊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置），右下角寫地名或距離 */
+/** 右邊地圖卡片：模糊地圖＋放大鏡（有移動＝路線；沒移動＝目前位置；沒有點＝台灣），右下角紙片寫地名或距離 */
 async function rightCard(row, d) {
   const route = d.route || []
-  const view = route.length ? mapView(route) : null
-  let top = 'today'
+  const view = mapView(route)
+  let top = '今天'
   let main = '還沒有足跡'
-  if (view && view.route) main = `走了 ${routeKm(route).toFixed(1)} km`
-  else if (view) {
-    top = 'today at'
+  if (view.route) main = `走了 ${routeKm(route).toFixed(1)} km`
+  else if (view.pin) {
+    top = '今天在'
     main = (await placeName(d)) || '同一個地方'
   }
-  const { cx, cy, r, rim } = LENS
+  const { cx, cy, r } = LENS
   const card = row.addStack()
   card.size = new Size(CARD.w, CARD.h)
   card.cornerRadius = 14
   card.backgroundImage = await cardBackground(view)
   card.layoutVertically()
-  card.setPadding(0, 0, 6, 6)
   card.addSpacer(cy - r)
   const lensRow = card.addStack()
   lensRow.addSpacer(cx - r)
-  // 銅框（漸層）＋裡面的圓形鏡片
-  const rimStack = lensRow.addStack()
-  rimStack.size = new Size(r * 2, r * 2)
-  rimStack.cornerRadius = r
-  const g = new LinearGradient()
-  g.colors = [new Color('#F0D08A'), new Color('#B07D35'), new Color('#6B4518'), new Color('#C9984C')]
-  g.locations = [0, 0.4, 0.75, 1]
-  g.startPoint = new Point(0, 0)
-  g.endPoint = new Point(1, 1)
-  rimStack.backgroundGradient = g
-  rimStack.setPadding(rim, rim, rim, rim)
-  const glass = rimStack.addStack()
-  const dd = (r - rim) * 2
-  glass.size = new Size(dd, dd)
-  glass.cornerRadius = dd / 2
-  glass.borderColor = new Color('#3A2414', 0.6)
-  glass.borderWidth = 1
+  const glass = lensRow.addStack()
+  glass.size = new Size(r * 2, r * 2)
+  glass.cornerRadius = r
   glass.backgroundImage = await lensImage(view)
   lensRow.addSpacer()
   card.addSpacer()
+  // 紙片上的字（紙片本身畫在底圖上）
   const capRow = card.addStack()
   capRow.addSpacer()
-  const chip = capRow.addStack()
-  chip.layoutVertically()
-  chip.backgroundColor = new Color('#EFE4CF', 0.94)
-  chip.cornerRadius = 6
-  chip.setPadding(2, 7, 3, 7)
-  text(chip, top, 8, C.faint, serif(8, 'Italic'))
-  text(chip, main, 10, C.text, Font.mediumSystemFont(10))
+  const cap = capRow.addStack()
+  cap.layoutVertically()
+  cap.size = new Size(TAG.w, TAG.h)
+  cap.setPadding(3, 7, 3, 6)
+  text(cap, top, 8, C.faint, Font.lightSystemFont(8))
+  text(cap, main, 10, C.text, Font.mediumSystemFont(10))
+  capRow.addSpacer(TAG.right)
+  card.addSpacer(TAG.bottom)
 }
 
 async function mediumWidget(d, stale) {
@@ -537,7 +532,7 @@ async function mediumWidget(d, stale) {
   left.layoutVertically()
   left.size = new Size(150, 130)
   headerRows(left)
-  text(left, money(d.todayExpense), 32, C.text, serif(32))
+  text(left, money(d.todayExpense), 30, C.text, script(30))
   countLine(left, d)
   left.addSpacer()
   monthBlock(left, d, 150)
@@ -553,10 +548,10 @@ async function smallWidget(d, stale) {
   await paintBg(w, 'small')
   w.setPadding(18, 20, 16, 20)
   headerRows(w)
-  text(w, money(d.todayExpense), 28, C.text, serif(28))
+  text(w, money(d.todayExpense), 28, C.text, script(28))
   countLine(w, d)
   w.addSpacer()
-  monthBlock(w, d, 122)
+  monthBlock(w, d, 118, false)
   w.addSpacer(5)
   infoRow(w, d, stale)
   return w

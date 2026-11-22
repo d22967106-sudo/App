@@ -18,11 +18,11 @@
 
 ## 目前狀態
 
-**2026-11-22 小工具美化（工作分支 `claude/nice-pasteur-6gt4nv`，腳本版本 2026-11-22.3，還沒合併到預設分支）：** 使用者一路調整：要美術設計 → 奶茶色系、文青風、**不要奶茶（珍珠杯）裝飾** → **復古紙張**（不要髒污效果、要逼真；最後給參考圖：米灰舊紙、細顆粒、四周焦褐燒邊）→ 地圖那側要**放大鏡看舊地圖**的效果（給參考圖：模糊的地圖上一支銅框放大鏡，鏡片裡清楚）。目前做法：
-- **紙張背景是圖片**：`scriptable/make-paper.py`（numpy＋Pillow，程式生成，不用網路素材）產生 `public/widget/paper-medium.jpg`（338×158 點的 3 倍）、`paper-small.jpg`（158×158），跟 App 一起發布到 GitHub Pages（.jpg 不在 Service Worker 預先快取清單裡）。腳本 `loadPaper` 從 `APP_URL + widget/paper-*.jpg` 下載一次，存在 Scriptable 的 documentsDirectory（檔名含 `PAPER_VER`，換圖時加 1）；下載不到用 DrawContext 畫的米灰底＋暗角。**要先發布 App，小工具才下載得到紙**。
-- 字：深咖啡色（配深色舊紙），數字與英文 Baskerville、中文系統細體；英文斜體日期、細線進度。
-- 右邊地圖卡片（140×132，`rightCard`）：底圖＝**模糊的舊地圖**（DrawContext 不能模糊，改用「低 3 層的 OSM 圖磚放大 8 倍」，iOS 縮放內插自然變糊；範圍是鏡片的 4 倍）＋舊紙色調＋鏡片影子＋往左下的銅環木柄（畫在底圖上）；**放大鏡**＝圓角＝半徑的 stack（銅色漸層框，padding 5）裡面再一個圓形 stack，背景是清楚的地圖（z16 目前位置／路線自動縮放）＋邊緣暗角＋左上反光。右下角米色小標籤「today at／地名」「today／走了 X km」「today／還沒有足跡」。拍立得拿掉了。
-- 開發環境用 Playwright＋假的 Scriptable API（scratchpad）＋假圖磚看過；真的 OSM 圖磚模糊效果、Baskerville、Scriptable 圓形 stack 與漸層 startPoint 的實際樣子要在 iPhone 上確認。之前做過的版本（漸層膠囊、珍珠杯、文青米白＋拍立得、牛皮紙、金黃斑駁紙）都被使用者換掉，不要再提。
+**2026-11-22 小工具美化（工作分支 `claude/nice-pasteur-6gt4nv`，腳本版本 2026-11-22.4，還沒合併到預設分支）：** 使用者一路調整：要美術設計 → 奶茶色系、文青風、**不要奶茶（珍珠杯）裝飾** → **復古紙張**（不要髒污、要逼真；參考圖：米灰舊紙、細顆粒、四周焦褐燒邊，**紋路要淡**）→ 地圖那側要**真實的放大鏡看地圖**（放大鏡外模糊；沒有地圖也要放一張地圖做同樣效果）→ **字體偏草書** → 右下角標示要融入主題。目前做法：
+- **圖片素材**（`scriptable/make-widget-art.py`，numpy＋Pillow 程式生成，不用網路素材）→ `public/widget/`：`paper-medium.jpg`、`paper-small.jpg`（舊紙）、`magnifier.png`（跟地圖卡片一樣大 140×132 點的 3 倍，透明背景：環形斷面光影的銅框、木紋木柄、銅套、影子，鏡片處挖空）、`glass.png`（鏡片邊緣暗圈、內緣亮邊、左上弧形反光）。跟 App 一起發布到 GitHub Pages（png 會進 Service Worker 預先快取，共約 140 KB）。腳本 `loadArt` 從 `APP_URL + widget/…` 下載一次存在 Scriptable 的 documentsDirectory（檔名含 `ART_VER`，換圖時加 1）；紙下載不到用 DrawContext 畫的米灰底，放大鏡下載不到就只有地圖。**要先發布 App，小工具才下載得到圖**。
+- 地圖卡片（`rightCard`）：底圖＝**模糊的地圖**（DrawContext 不能模糊，用「低 4 層的 OSM 圖磚放大 16 倍」，範圍是鏡片的 4 倍）＋舊地圖色調＋四周暗角＋放大鏡圖＋右下角撕邊舊紙片（`drawTag`，DrawContext 畫）；鏡片＝圓形 stack（`LENS` r 38，比挖空的洞大 1 點蓋住接縫），裡面是清楚的地圖（放大 1.25 倍）＋路線／圓點＋玻璃反光圖。沒有任何定位時鏡片看台灣（`DEFAULT_VIEW` z7），紙片寫「今天／還沒有足跡」。放大鏡位置（CARD、LENS）在 Python 和腳本裡要一致。
+- 字：日期與金額用 iPhone 內建草寫體 `SnellRoundhand-Bold`（`script()`，只有英文與數字）；日期「Sunday, Nov 22」；「今日支出　今天記了 N 筆」合成一行；中文用系統字。**iPhone 沒有內建中文草書字體，Scriptable 也不能下載字體**，已跟使用者說明。
+- 開發環境用 Playwright＋假的 Scriptable API（scratchpad）＋假圖磚＋相近的草寫字（Pinyon Script）看過；真的 OSM 模糊效果、Snell Roundhand 實際寬度、圓形 stack 跟放大鏡圖對不對得齊要在 iPhone 上確認。之前做過的版本（漸層膠囊、珍珠杯、文青米白＋拍立得、牛皮紙、金黃斑駁紙、DrawContext 畫的卡通放大鏡）都被使用者換掉，不要再提。
 - **要經使用者同意合併到預設分支發布，使用者再到設定頁重新複製腳本貼到 Scriptable（腳本名稱、捷徑名稱沒動）。**
 
 **2026-11-21～22 路線與耗電調整（工作分支 `claude/affectionate-maxwell-xwwddl`，每次都經使用者同意推到預設分支發布；最後版本 11/22 01:08）。使用者說「先這樣」暫停。細節見下方「路線改善」底下 2026-11-21 起的條目。待使用者實測：**
