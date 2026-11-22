@@ -13,8 +13,8 @@ import { distanceM, getCurrentPosition } from '../lib/geo'
 import { navigate, useLiveQuery } from '../lib/hooks'
 import { formatDateLong, formatTime, isDateKey, relativeDayLabel, shiftDate, toDateKey } from '../lib/ledger'
 import { useStayNames } from '../lib/stayNames'
-import { carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
-import { getLegEdits, getLegModes, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, spliceLine, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
+import { applyCuts, carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
+import { getLegCuts, getLegEdits, getLegModes, updateLegCuts, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, spliceLine, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto, MAX_ACCURACY } from '../lib/stays'
 import type { Entry, GeoPoint } from '../lib/types'
 
@@ -43,11 +43,15 @@ function formatShort(ms: number): string {
 type LegEdits = Record<string, [number, number][]>
 
 /** 路線設定、手動選的交通方式、手繪修改的路線（設定頁或卡片改了會跟著變） */
-function useRouteSettings(): { settings: RouteSettings; legModes: Record<string, TravelMode>; legEdits: LegEdits } {
-  const [st, setSt] = useState<{ settings: RouteSettings; legModes: Record<string, TravelMode>; legEdits: LegEdits }>({ settings: DEFAULT_ROUTE_SETTINGS, legModes: {}, legEdits: {} })
+type RouteState = { settings: RouteSettings; legModes: Record<string, TravelMode>; legEdits: LegEdits; legCuts: Record<string, number[]> }
+
+function useRouteSettings(): RouteState {
+  const [st, setSt] = useState<RouteState>({ settings: DEFAULT_ROUTE_SETTINGS, legModes: {}, legEdits: {}, legCuts: {} })
   useEffect(() => {
     const load = () =>
-      Promise.all([getRouteSettings(), getLegModes(), getLegEdits()]).then(([settings, legModes, legEdits]) => setSt({ settings, legModes, legEdits }))
+      Promise.all([getRouteSettings(), getLegModes(), getLegEdits(), getLegCuts()]).then(([settings, legModes, legEdits, legCuts]) =>
+        setSt({ settings, legModes, legEdits, legCuts }),
+      )
     load()
     return onRouteSettingsChange(load)
   }, [])
@@ -136,8 +140,9 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const lastAuto = useMemo(() => (fullTrack ?? []).filter(isAuto).sort((a, b) => a.time - b.time).at(-1) ?? null, [fullTrack])
 
   // ── 一段一段的移動、交通方式、貼齊道路 ──
-  const legs = useMemo(() => computeLegs(fullTrack ?? [], stays), [fullTrack, stays])
-  const { settings: routeSettings, legModes, legEdits } = useRouteSettings()
+  const { settings: routeSettings, legModes, legEdits, legCuts } = useRouteSettings()
+  const dayCuts = legCuts[date]
+  const legs = useMemo(() => applyCuts(computeLegs(fullTrack ?? [], stays), dayCuts ?? []), [fullTrack, stays, dayCuts])
   const modeOf = useCallback(
     (l: Leg): { mode: TravelMode; auto: boolean } => {
       const manual = legModes[`${date}/${l.id}`]
@@ -188,7 +193,12 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const [drawing, setDrawing] = useState(false)
   const [drawBusy, setDrawBusy] = useState(false)
   const [legSel, setLegSel] = useState<string | null>(null)
-  useEffect(() => setDrawing(false), [legSel, date])
+  // 手動切出一段：null＝沒在選；'start'＝等起點；數字＝已選的起點時間
+  const [cutting, setCutting] = useState<null | 'start' | number>(null)
+  useEffect(() => {
+    setDrawing(false)
+    setCutting(null)
+  }, [legSel, date])
   useEffect(() => setLegSel(null), [date])
   const pickedLeg = legs.find((l) => l.id === legSel) ?? null
   const snapStatus = useMemo(() => {
@@ -284,6 +294,9 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
 
   // 除錯：背景定位的原始點（設定頁「路線」打開）
   const dots = useMemo<MapDot[] | undefined>(() => {
+    // 手動切段：這段用到的每個點都可以點來當起點／終點
+    if (cutting != null && pickedLeg)
+      return pickedLeg.points.map((p) => ({ lat: p.lat, lng: p.lng, id: String(p.time), picked: p.time === cutting, label: formatTime(p.time) }))
     if (!routeSettings.rawPoints || !rawTrack) return undefined
     return rawTrack
       .filter(isAuto)
@@ -294,7 +307,39 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         const sec = String(t.getSeconds()).padStart(2, '0')
         return { lat: p.lat, lng: p.lng, unused, label: `${formatTime(p.time)}:${sec} · 精確度 ${p.accuracy != null ? `±${p.accuracy} m` : '不明'}${unused ? '（太差，不採用）' : ''}` }
       })
-  }, [routeSettings.rawPoints, rawTrack])
+  }, [routeSettings.rawPoints, rawTrack, cutting, pickedLeg])
+
+  const onCutPoint = async (id: string) => {
+    if (!pickedLeg || cutting == null) return
+    const t = Number(id)
+    if (cutting === 'start') {
+      if (t === pickedLeg.end) return toast('起點不能選這段的最後一個點', 2500)
+      setCutting(t)
+      return
+    }
+    if (t === cutting) return setCutting('start')
+    const a = Math.min(cutting, t)
+    const b = Math.max(cutting, t)
+    if (a === pickedLeg.start && b === pickedLeg.end) {
+      setCutting(null)
+      return toast('選的是整段，不用切；直接在下面選交通方式就好', 3000)
+    }
+    // 切開後原本手繪修改的線對不上了，拿掉
+    if (editOf(pickedLeg)) await setLegEdit(date, pickedLeg.id, null)
+    await updateLegCuts(date, [a, b].filter((x) => x !== pickedLeg.start && x !== pickedLeg.end))
+    setCutting(null)
+    setLegSel(`leg-${a}`)
+    toast(`已切出 ${formatTime(a)}–${formatTime(b)}，可以選這段的交通方式`, 3000)
+  }
+
+  const onUncut = async (l: Leg) => {
+    const remove = [...(l.cutStart ? [l.start] : []), ...(l.cutEnd ? [l.end] : [])]
+    // 合併後的段 id 會變，切點兩邊的手繪修改都對不上，拿掉
+    for (const x of legs) if ((x.end === l.start && l.cutStart) || (x.start === l.end && l.cutEnd) || x === l) if (editOf(x)) await setLegEdit(date, x.id, null)
+    await updateLegCuts(date, [], remove)
+    setLegSel(null)
+    toast('已合併回前後段')
+  }
 
   const copyRawPoints = async () => {
     const pts0 = (rawTrack ?? []).filter(isAuto).length
@@ -451,7 +496,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       <MapView
         route={route}
         routes={mapRoutes}
-        onRouteClick={(id) => pickLeg(id === legSel ? null : id)}
+        onRouteClick={(id) => cutting == null && pickLeg(id === legSel ? null : id)}
         drawMode={drawing && !!pickedLeg}
         onDrawEnd={async (pts) => {
           if (!pickedLeg) return
@@ -468,8 +513,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         }}
         // 對焦只看這段的定位點：手繪修改或貼齊完成時畫面不會跳（一段一段修改時才找得到剛才的位置）
         focus={pickedLeg ? pickedLeg.points : null}
-        markers={markers}
+        // 選點切段時先藏起標記，頭尾的點才點得到
+        markers={cutting != null ? [] : markers}
         dots={dots}
+        onDotClick={onCutPoint}
         selectedId={selected}
         onSelect={(id) => {
           setLegSel(null)
@@ -479,7 +526,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         myLocation={myPos}
         fallbackCenter={lastPos ?? TAIPEI}
         bottomPadding={(pickedLeg ? LEG_SHEET_H : peek) + 56}
-        topPadding={pickedLeg ? 260 : 70}
+        topPadding={pickedLeg ? 300 : 70}
         ariaLabel={`${formatDateLong(date)}的路線地圖`}
       />
 
@@ -531,6 +578,9 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           drawBusy={drawBusy}
           onDraw={() => setDrawing((d) => !d)}
           onRestore={() => setLegEdit(date, pickedLeg.id, null)}
+          cutting={cutting}
+          onCut={() => setCutting((c) => (c == null ? 'start' : null))}
+          onUncut={pickedLeg.cutStart || pickedLeg.cutEnd ? () => onUncut(pickedLeg) : null}
         />
       ) : (
         snapStatus && <div className="snap-chip">{snapStatus}</div>
@@ -729,6 +779,9 @@ function LegCard({
   drawBusy,
   onDraw,
   onRestore,
+  cutting,
+  onCut,
+  onUncut,
 }: {
   leg: Leg
   title: string
@@ -747,6 +800,9 @@ function LegCard({
   drawBusy: boolean
   onDraw: () => void
   onRestore: () => void
+  cutting: null | 'start' | number
+  onCut: () => void
+  onUncut: (() => void) | null
 }) {
   const dur = leg.end - leg.start
   // 畫線時卡片縮成一行，讓出地圖空間
@@ -756,6 +812,19 @@ function LegCard({
         <p className="leg-draw-hint">只要畫錯的那一小段：從原本的線上開始畫、畫回原本的線上放開，就只換掉中間那段（可以一段一段改）。要放大用兩指縮放。</p>
         <div className="leg-edit">
           <button onClick={onDraw}>取消手繪</button>
+        </div>
+      </section>
+    )
+  if (cutting != null)
+    return (
+      <section className="leg-card leg-card-drawing" aria-label={`切出一段：${title}`}>
+        <p className="leg-draw-hint">
+          {cutting === 'start'
+            ? '點路線上的藍點當起點（這段從哪個點開始）。'
+            : `起點 ${formatTime(cutting)}（橘點）。再點一個藍點當終點，中間就切成單獨一段，可以另外選交通方式。`}
+        </p>
+        <div className="leg-edit">
+          <button onClick={onCut}>取消</button>
         </div>
       </section>
     )
@@ -806,6 +875,16 @@ function LegCard({
         {edited && (
           <button onClick={onRestore} disabled={drawBusy}>
             還原自動路線
+          </button>
+        )}
+      </div>
+      <div className="leg-edit">
+        <button onClick={onCut} disabled={drawBusy || leg.points.length < 3}>
+          選點切出一段
+        </button>
+        {onUncut && (
+          <button onClick={onUncut} disabled={drawBusy}>
+            合併回前後段
           </button>
         )}
       </div>

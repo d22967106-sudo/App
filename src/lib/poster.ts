@@ -3,7 +3,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { MAP_STYLES, type VectorStyle } from './mapStyles'
 import type { GeoPoint } from './types'
 import type { StyleSpec } from './vectorStyle'
-import { videoFrameAt, type FrameState } from './posterTimeline'
+import { videoBitrate, videoFrameAt, type FrameState, type VideoPlan } from './posterTimeline'
 
 export { videoFrameAt }
 
@@ -327,7 +327,73 @@ async function prepare(input: PosterInput): Promise<Prepared> {
 // ── 畫一格 ──
 
 function finalFrame(p: Prepared): FrameState {
-  return { progress: p.days.length, titleAlpha: 1, names: p.input.showNames, numbers: p.input.stats, chip: null }
+  return { progress: p.days.length, titleAlpha: 1, names: p.input.showNames, numbers: p.input.stats, chip: null, photo: null, shown: [] }
+}
+
+/** 影片裡的照片：大圖（彈出用，邊錄邊解碼）、地圖上的小圓圖、位置 */
+interface Media {
+  big: (HTMLCanvasElement | null)[]
+  pins: (HTMLCanvasElement | null)[]
+  locs: (GeoPoint | null)[]
+}
+
+const PIN = 64
+
+function drawPhotos(p: Prepared, f: FrameState, m: Media) {
+  const { ctx, mx, my, mw, mh } = p
+  // 播過的照片：在拍的地方留一個小圓圖
+  for (const i of f.shown) {
+    const pin = m.pins[i]
+    const loc = m.locs[i]
+    if (!pin || !loc) continue
+    const [x, y] = p.project(loc)
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(x, y, PIN / 2 + 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#FFFFFF'
+    ctx.shadowColor = 'rgba(58, 38, 24, 0.3)'
+    ctx.shadowBlur = 8
+    ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.beginPath()
+    ctx.arc(x, y, PIN / 2, 0, Math.PI * 2)
+    ctx.clip()
+    ctx.drawImage(pin, x - PIN / 2, y - PIN / 2, PIN, PIN)
+    ctx.restore()
+  }
+  // 正在彈出的照片：從拍的地方放大到地圖中間，停一下，再縮回去
+  if (!f.photo) return
+  const img = m.big[f.photo.index]
+  if (!img) return
+  const ph = f.photo.phase
+  const k = ph < 0.2 ? ph / 0.2 : ph > 0.8 ? (1 - ph) / 0.2 : 1
+  const ease = 1 - (1 - k) * (1 - k)
+  const border = 14
+  const maxW = mw - 90
+  const maxH = mh - 90
+  const s = Math.min(maxW / img.width, maxH / img.height)
+  const fw = img.width * s
+  const fh = img.height * s
+  const loc = m.locs[f.photo.index]
+  const [ox, oy] = loc ? p.project(loc) : [mx + mw / 2, my + mh / 2]
+  const cx = ox + (mx + mw / 2 - ox) * ease
+  const cy = oy + (my + mh / 2 - oy) * ease
+  const sc = 0.15 + 0.85 * ease
+  ctx.save()
+  ctx.fillStyle = `rgba(58, 38, 24, ${0.28 * ease})`
+  ctx.fillRect(mx, my, mw, mh)
+  ctx.globalAlpha = Math.min(1, k * 1.5)
+  ctx.translate(cx, cy)
+  ctx.scale(sc, sc)
+  ctx.shadowColor = 'rgba(58, 38, 24, 0.35)'
+  ctx.shadowBlur = 30
+  ctx.shadowOffsetY = 10
+  ctx.fillStyle = '#FFFFFF'
+  roundRect(ctx, -fw / 2 - border, -fh / 2 - border, fw + border * 2, fh + border * 2, 18)
+  ctx.fill()
+  ctx.shadowColor = 'transparent'
+  ctx.drawImage(img, -fw / 2, -fh / 2, fw, fh)
+  ctx.restore()
 }
 
 /** 顏色太淺時字用深色 */
@@ -353,7 +419,7 @@ function strokeRoute(ctx: CanvasRenderingContext2D, d: ProjectedDay, upto: numbe
   }
 }
 
-function drawFrame(p: Prepared, f: FrameState) {
+function drawFrame(p: Prepared, f: FrameState, media?: Media) {
   const { ctx, input, w, h, mx, my, mw, mh, titleBase } = p
   ctx.save()
   ctx.fillStyle = BG
@@ -432,6 +498,8 @@ function drawFrame(p: Prepared, f: FrameState) {
         ctx.textAlign = 'left'
       }
     }
+
+    if (media) drawPhotos(p, f, media)
 
     // 影片：左上角「Day 2 · 花蓮」
     if (f.chip) {
@@ -524,33 +592,107 @@ export function canRecordVideo(): boolean {
   return !!pickMime() && typeof HTMLCanvasElement.prototype.captureStream === 'function'
 }
 
+/** 影片裡的一張照片：顯示版（拿不到就縮圖）、縮圖、拍的地方 */
+export interface VideoPhotoSrc {
+  blob: Blob
+  thumb: Blob | null
+  loc: GeoPoint | null
+}
+
+/** 照片解碼後縮到這個長邊（影片只有 1080 寬，不用留 2048） */
+const BIG_EDGE = 1080
+
+async function decode(blob: Blob, edge: number, square = false): Promise<HTMLCanvasElement | null> {
+  try {
+    const bmp = await createImageBitmap(blob)
+    const c = document.createElement('canvas')
+    if (square) {
+      const side = Math.min(bmp.width, bmp.height)
+      c.width = c.height = edge
+      c.getContext('2d')!.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, edge, edge)
+    } else {
+      const s = Math.min(1, edge / Math.max(bmp.width, bmp.height))
+      c.width = Math.round(bmp.width * s)
+      c.height = Math.round(bmp.height * s)
+      const cx = c.getContext('2d')!
+      cx.imageSmoothingQuality = 'high'
+      cx.drawImage(bmp, 0, 0, c.width, c.height)
+    }
+    bmp.close()
+    return c
+  } catch {
+    return null
+  }
+}
+
 /**
  * 錄影片：準備好畫布後交給 onCanvas 放到畫面上（邊錄邊看；錄的時候畫布要在畫面上），
  * 用 requestAnimationFrame 一格一格畫，MediaRecorder 錄下 canvas 的畫面。
+ * photos 跟 plan.photos 一一對應。大圖只先解碼快要播的幾張、播完就丟（照片多時手機記憶體才夠）。
  */
 export async function recordVideo(
   input: PosterInput,
-  duration: number,
-  hooks: { onCanvas: (c: HTMLCanvasElement) => void; onProgress: (sec: number) => void; signal?: AbortSignal },
+  plan: VideoPlan,
+  photos: VideoPhotoSrc[],
+  hooks: { onCanvas: (c: HTMLCanvasElement) => void; onProgress: (sec: number) => void; onPreparing?: (done: number, total: number) => void; signal?: AbortSignal },
 ): Promise<VideoResult> {
   const mime = pickMime()
   if (!mime || typeof HTMLCanvasElement.prototype.captureStream !== 'function') throw new Error('這支手機的瀏覽器不支援錄影')
+  const duration = plan.duration
   const p = await prepareWithFallback(input)
-  drawFrame(p, videoFrameAt(p, 0, duration))
+  // 地圖上的小圓圖先全部做好（很小，不佔記憶體）
+  const media: Media = { big: photos.map(() => null), pins: [], locs: photos.map((x) => x.loc) }
+  for (let i = 0; i < photos.length; i++) {
+    if (hooks.signal?.aborted) throw new DOMException('已取消', 'AbortError')
+    media.pins.push(photos[i].loc ? await decode(photos[i].thumb ?? photos[i].blob, PIN * 2, true) : null)
+    hooks.onPreparing?.(i + 1, photos.length)
+  }
+  const loading = new Set<number>()
+  const ensure = (from: number) => {
+    // 正在播與接下來 3 張解碼好；更早的丟掉
+    for (let i = 0; i < photos.length; i++) {
+      if (i < from - 1) media.big[i] = null
+      else if (i <= from + 3 && !media.big[i] && !loading.has(i)) {
+        loading.add(i)
+        decode(photos[i].blob, BIG_EDGE).then((c) => {
+          loading.delete(i)
+          media.big[i] = c
+        })
+      }
+    }
+  }
+  ensure(0)
+  // 第一張先等它解碼好再開始錄
+  for (let w = 0; w < 50 && photos.length && !media.big[0]; w++) await new Promise((r) => setTimeout(r, 100))
+  drawFrame(p, videoFrameAt(p, 0, plan), media)
   hooks.onCanvas(p.canvas)
+  // 錄影時螢幕不要自動關（不支援就算了）
+  let wake: { release: () => Promise<void> } | null = null
+  try {
+    wake = await (navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }).wakeLock?.request('screen') ?? null
+  } catch {
+    /* 不支援 */
+  }
   const stream = p.canvas.captureStream(30)
-  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8_000_000 })
+  const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBitrate(duration) })
   const chunks: Blob[] = []
   recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
   const stopped = new Promise<void>((resolve) => (recorder.onstop = () => resolve()))
-  recorder.start(500)
+  recorder.start(1000)
   await new Promise<void>((resolve, reject) => {
     const t0 = performance.now()
     let last = -1
+    let lastPhoto = -1
     const tick = () => {
       if (hooks.signal?.aborted) return reject(new DOMException('已取消', 'AbortError'))
       const t = (performance.now() - t0) / 1000
-      drawFrame(p, videoFrameAt(p, Math.min(t, duration), duration))
+      const f = videoFrameAt(p, Math.min(t, duration), plan)
+      const cur = f.photo?.index ?? (f.shown.length ? f.shown[f.shown.length - 1] + 1 : 0)
+      if (cur !== lastPhoto) {
+        lastPhoto = cur
+        ensure(cur)
+      }
+      drawFrame(p, f, media)
       const sec = Math.floor(t)
       if (sec !== last) {
         last = sec
@@ -563,6 +705,7 @@ export async function recordVideo(
   }).finally(() => {
     if (recorder.state !== 'inactive') recorder.stop()
     stream.getTracks().forEach((tr) => tr.stop())
+    wake?.release().catch(() => {})
   })
   await stopped
   const type = mime.split(';')[0]

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { calendarDays, categoryTotals, comparePeriod, eachDate, expenseSeries, firstWeekday, shiftMonth, sumExpenseUntil } from './stats'
 import { dayColor, dayDashed, dayTitle, formatTripRange, mergeTrips, normalizeSegments, tripDates, tripDaysText, guessHome, guessTripName, suggestTrips, summarizeTrip } from './trips'
 import { formatBytes, yearsLeft, yearsText } from './usage'
-import { videoFrameAt } from './posterTimeline'
+import { AUTO_MAX_SEC, pickEvenly, planVideo, videoFrameAt } from './posterTimeline'
 import type { PosterInput } from './poster'
 import type { Entry, TrackPoint, Trip } from './types'
 
@@ -251,5 +251,56 @@ describe('軌跡影片的時間軸', () => {
     expect(f.numbers).toEqual(input.stats)
     expect(f.names).toBe(true)
     expect(f.chip).toBeNull()
+  })
+})
+
+describe('軌跡影片放照片（自動判斷長度）', () => {
+  const day = (label: string) => ({ color: '#59413C', route: [], landmark: null, label, km: 10, photos: 2, expense: 0, steps: 0 })
+  const input = {
+    name: '環島', start: '2026-12-01', end: '2026-12-02', days: [day('Day 1'), day('Day 2')],
+    stats: { km: 20, places: 2, photos: 4, expense: 0, steps: 0 }, ratio: '9:16', basemap: 'none', showMoney: true, showNames: true, showCredit: true,
+  } as PosterInput
+  const p = { input, days: input.days.map((d) => ({ day: d, pts: [], cum: [0] })) }
+
+  it('依照片張數決定長度：每張 1.2 秒＋每天 1.5 秒＋開場結尾', () => {
+    const plan = planVideo(2, [0, 0, 1, 1], 'auto')
+    expect(plan.photos).toHaveLength(4)
+    expect(plan.duration).toBeCloseTo(1.5 + 3 + 2 * 1.5 + 4 * 1.2)
+    // 沒照片也至少 10 秒
+    expect(planVideo(2, [], 'auto').duration).toBe(10)
+  })
+
+  it('照片太多：最長 600 秒，平均挑', () => {
+    const days = Array.from({ length: 2000 }, (_, i) => (i < 1000 ? 0 : 1))
+    const plan = planVideo(2, days, 'auto')
+    expect(plan.duration).toBeLessThanOrEqual(AUTO_MAX_SEC)
+    expect(plan.duration).toBeGreaterThan(AUTO_MAX_SEC - 2)
+    expect(plan.photos.length).toBeLessThan(2000)
+    expect(plan.photos[0].src).toBe(0)
+    expect(plan.photos.at(-1)!.src).toBe(1999)
+    expect(pickEvenly(5, 3)).toEqual([0, 2, 4])
+  })
+
+  it('固定 15 秒：照片最多占 6 成時間', () => {
+    const plan = planVideo(2, Array(30).fill(0), 15)
+    expect(plan.duration).toBe(15)
+    expect(plan.photos.length * plan.photoSec).toBeLessThanOrEqual((15 - 4.5) * 0.6 + 1e-9)
+    expect(plan.photoSec).toBeGreaterThanOrEqual(1)
+  })
+
+  it('畫到照片時路線停住、照片彈出；播過的照片留在地圖上', () => {
+    const plan = planVideo(2, [0, 0, 1, 1], 'auto')
+    // 第 1 天：畫 0.5 秒 → 照片 1.2 秒 → 畫 0.5 秒 → 照片 1.2 秒 → 畫 0.5 秒
+    const during = videoFrameAt(p, 1.5 + 0.5 + 0.6, plan)
+    expect(during.photo?.index).toBe(0)
+    expect(during.photo?.phase).toBeCloseTo(0.5)
+    expect(during.progress).toBeCloseTo(1 / 3)
+    const after = videoFrameAt(p, 1.5 + 0.5 + 1.2 + 0.25, plan)
+    expect(after.photo).toBeNull()
+    expect(after.shown).toEqual([0])
+    expect(after.progress).toBeCloseTo(0.5)
+    const end = videoFrameAt(p, plan.duration - 1, plan)
+    expect(end.shown).toEqual([0, 1, 2, 3])
+    expect(end.progress).toBe(2)
   })
 })

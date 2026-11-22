@@ -28,6 +28,10 @@ export interface MapDot extends GeoPoint {
   label: string
   /** App 不採用的點（精確度太差）畫成灰色 */
   unused?: boolean
+  /** 選點模式：有 id 的點畫大一點、點了呼叫 onDotClick（不跳說明） */
+  id?: string
+  /** 選點模式：已選的點 */
+  picked?: boolean
 }
 
 export interface MapMarker {
@@ -51,6 +55,8 @@ interface Props {
   markers: MapMarker[]
   /** 原始定位點（不影響畫面範圍） */
   dots?: MapDot[]
+  /** 點了有 id 的原始點 */
+  onDotClick?: (id: string) => void
   selectedId?: string | null
   onSelect?: (id: string) => void
   /** 播放中的位置 */
@@ -119,6 +125,7 @@ export function MapView({
   focus,
   markers,
   dots,
+  onDotClick,
   selectedId,
   onSelect,
   playhead,
@@ -142,6 +149,8 @@ export function MapView({
   onSelectRef.current = onSelect
   const onRouteClickRef = useRef(onRouteClick)
   onRouteClickRef.current = onRouteClick
+  const onDotClickRef = useRef(onDotClick)
+  onDotClickRef.current = onDotClick
   // 建立地圖
   useEffect(() => {
     const el = elRef.current!
@@ -215,6 +224,25 @@ export function MapView({
       }
     }
     for (const d of dots ?? []) {
+      if (d.id && !isStatic) {
+        const id = d.id
+        L.circleMarker([d.lat, d.lng], {
+          radius: d.picked ? 10 : 7,
+          color: '#FFFFFF',
+          weight: 2.5,
+          fillColor: d.picked ? '#D9480F' : '#2B6CB0',
+          fillOpacity: 1,
+          interactive: false,
+        }).addTo(layer)
+        // 看不見的大圓，手指比較好點到
+        L.circleMarker([d.lat, d.lng], { radius: 18, stroke: false, fillOpacity: 0, interactive: true })
+          .on('click', (e) => {
+            L.DomEvent.stopPropagation(e)
+            onDotClickRef.current?.(id)
+          })
+          .addTo(layer)
+        continue
+      }
       L.circleMarker([d.lat, d.lng], {
         radius: 4,
         color: '#FFFFFF',

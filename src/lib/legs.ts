@@ -1,4 +1,5 @@
 import { distanceM } from './geo'
+import { formatTime } from './ledger'
 import { cleanPath, isAuto, usableAutoPoints, type Stay } from './stays'
 import type { GeoPoint, TrackPoint } from './types'
 
@@ -49,6 +50,9 @@ export interface Leg {
   /** 同一段移動中途換交通方式（停車走路、走路去取車）切開時，切點的名稱 */
   fromLabel?: string
   toLabel?: string
+  /** 頭／尾是使用者手動切的 */
+  cutStart?: boolean
+  cutEnd?: boolean
 }
 
 function pathKm(pts: GeoPoint[]): number {
@@ -204,6 +208,60 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
     })
   }
   return legs
+}
+
+/**
+ * 使用者手動切段（2026-11-22 使用者要求：自己選一個原始點到另一個原始點，那一段單獨選交通方式）。
+ * cuts 是切點的時間（毫秒）；每個切點找這段裡時間最近的點（相差 2 分鐘內、不是頭尾）切開，切點兩段共用。
+ */
+export function applyCuts(legs: Leg[], cuts: number[]): Leg[] {
+  if (!cuts.length) return legs
+  const out: Leg[] = []
+  for (const leg of legs) {
+    const pts = leg.points
+    const idx = new Set<number>()
+    for (const c of cuts) {
+      if (c <= leg.start || c >= leg.end) continue
+      let best = -1
+      let bd = Infinity
+      for (let i = 1; i < pts.length - 1; i++) {
+        const d = Math.abs(pts[i].time - c)
+        if (d < bd) {
+          bd = d
+          best = i
+        }
+      }
+      if (best > 0 && bd <= 120000) idx.add(best)
+    }
+    if (!idx.size) {
+      out.push(leg)
+      continue
+    }
+    const at = [0, ...[...idx].sort((a, b) => a - b), pts.length - 1]
+    for (let k = 0; k < at.length - 1; k++) {
+      const part = pts.slice(at[k], at[k + 1] + 1)
+      const pk = pathKm(part)
+      const hours = (part[part.length - 1].time - part[0].time) / 3600000
+      const first = k === 0
+      const last = k === at.length - 2
+      out.push({
+        id: `leg-${part[0].time}`,
+        start: part[0].time,
+        end: part[part.length - 1].time,
+        points: part,
+        from: first ? leg.from : null,
+        to: last ? leg.to : null,
+        km: Math.round(pk * 10) / 10,
+        avgKmh: hours > 0 ? pk / hours : 0,
+        maxKmh: maxSpeed(part),
+        cutStart: !first || leg.cutStart,
+        cutEnd: !last || leg.cutEnd,
+        ...(first ? (leg.fromLabel ? { fromLabel: leg.fromLabel } : {}) : { fromLabel: formatTime(part[0].time) }),
+        ...(last ? (leg.toLabel ? { toLabel: leg.toLabel } : {}) : { toLabel: formatTime(part[part.length - 1].time) }),
+      })
+    }
+  }
+  return out
 }
 
 /** 走路速度（km/h）以下 */

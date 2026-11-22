@@ -9,7 +9,9 @@ import {
   getAllEntries,
   getAllTrack,
   getAllTrips,
+  cacheGet,
   getEntriesInRange,
+  getPhoto,
   getMeta,
   getStepsInRange,
   getTrackInRange,
@@ -19,9 +21,11 @@ import {
   setMeta,
 } from '../lib/db'
 import { goBack, navigate, useLiveQuery, useObjectUrl } from '../lib/hooks'
-import { getSyncStatus, missingTables, onSyncStatus } from '../lib/sync'
+import { getSyncStatus, loadDisplay, missingTables, onSyncStatus } from '../lib/sync'
 import { isDateKey, shiftDate, toDateKey } from '../lib/ledger'
-import { canRecordVideo, recordVideo, renderPoster, type PosterBasemap, type PosterInput, type PosterRatio, type VideoResult } from '../lib/poster'
+import { canRecordVideo, recordVideo, renderPoster, type PosterBasemap, type PosterInput, type PosterRatio, type VideoPhotoSrc, type VideoResult } from '../lib/poster'
+import { estimateVideoBytes, planVideo, videoBitrate } from '../lib/posterTimeline'
+import { formatBytes } from '../lib/usage'
 import {
   dayColor,
   dayDashed,
@@ -607,6 +611,21 @@ function TripDetail({ id }: { id: string }) {
 
 type PosterMode = 'image' | 'video'
 const VIDEO_LENGTHS = [10, 15, 20]
+/** 一張顯示版大約多大（下載流量估計用，見 plan.md） */
+const DISPLAY_BYTES = 375 * 1024
+
+/** 1 分 5 秒、45 秒 */
+function formatSec(sec: number): string {
+  const s = Math.round(sec)
+  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分${s % 60 ? ` ${s % 60} 秒` : ''}`
+}
+
+/** 旅程裡的每張照片（照時間排好）：第幾天、拍的地方 */
+async function tripPhotos(trip: Trip): Promise<{ id: string; day: number; loc: GeoPoint | null }[]> {
+  const dates = tripDates(trip)
+  const entries = (await getEntriesInRange(trip.start, trip.end)).filter((e) => dates.includes(e.date) && e.photoIds.length).sort((a, b) => a.time - b.time)
+  return entries.flatMap((e) => e.photoIds.map((id) => ({ id, day: dates.indexOf(e.date), loc: e.location ? { lat: e.location.lat, lng: e.location.lng } : null })))
+}
 
 function PosterPage({ id }: { id: string }) {
   const data = useLiveQuery(async () => {
@@ -616,7 +635,7 @@ function PosterPage({ id }: { id: string }) {
   const [mode, setMode] = useState<PosterMode>('image')
   const [imageRatio, setImageRatio] = useState<PosterRatio>('4:5')
   const [videoRatio, setVideoRatio] = useState<PosterRatio>('9:16')
-  const [length, setLength] = useState(15)
+  const [length, setLength] = useState<number | 'auto'>('auto')
   const [basemap, setBasemap] = useState<PosterBasemap>('tea')
   const [showMoney, setShowMoney] = useState(true)
   const [showNames, setShowNames] = useState(true)
@@ -628,6 +647,8 @@ function PosterPage({ id }: { id: string }) {
   const [video, setVideo] = useState<VideoResult | null>(null)
   const videoUrl = useObjectUrl(video?.blob)
   const [recording, setRecording] = useState<number | null>(null)
+  const [recDuration, setRecDuration] = useState(0)
+  const [preparing, setPreparing] = useState<string | null>(null)
   const liveRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   useEffect(() => () => abortRef.current?.abort(), [])
@@ -691,15 +712,54 @@ function PosterPage({ id }: { id: string }) {
   useEffect(() => setVideo(null), [length])
 
   const record = async () => {
-    if (!input) return
+    if (!input || !data) return
+    const all = await tripPhotos(data.trip)
+    let plan = planVideo(input.days.length, all.map((x) => x.day), length)
+    const chosen = plan.photos.map((p) => all[p.src])
+    // 先看要下載幾張，問過再開始
+    const recs = await Promise.all(chosen.map((c) => getPhoto(c.id)))
+    let need = 0
+    for (const r of recs) if (r && !r.display && r.uploaded && !(await cacheGet(r.id).catch(() => undefined))) need++
+    const lines = [
+      all.length === 0
+        ? '這趟沒有照片，影片只畫路線。'
+        : chosen.length === all.length
+          ? `這趟有 ${all.length} 張照片，全部放進影片。`
+          : `這趟有 ${all.length} 張照片，${length === 'auto' ? '影片最長 10 分鐘，' : ''}平均挑 ${chosen.length} 張放進影片。`,
+      `影片長度約 ${formatSec(plan.duration)}（錄的時候要停在這個畫面這麼久，螢幕不要關）。`,
+      `預估影片大小約 ${formatBytes(estimateVideoBytes(plan, videoBitrate(plan.duration)))}（估計值，實際可能差一倍）。`,
+      ...(need ? [`其中 ${need} 張照片的大圖要從雲端下載，約 ${formatBytes(need * DISPLAY_BYTES)} 流量。`] : []),
+      '要開始錄製嗎？',
+    ]
+    if (!confirm(lines.join('\n\n'))) return
     const ac = new AbortController()
     abortRef.current = ac
     setVideo(null)
-    setRecording(0)
     try {
-      const r = await recordVideo(input, length, {
+      // 照片：顯示版（手機上、暫存或雲端），拿不到就用縮圖，都沒有就不放
+      const srcs: VideoPhotoSrc[] = []
+      const keep: number[] = []
+      for (let i = 0; i < chosen.length; i++) {
+        if (ac.signal.aborted) throw new DOMException('已取消', 'AbortError')
+        setPreparing(`準備照片 ${i + 1} / ${chosen.length}`)
+        const r = recs[i]
+        if (!r) continue
+        const big = (await loadDisplay(r)).blob ?? r.thumb
+        if (!big) continue
+        srcs.push({ blob: big, thumb: r.thumb, loc: chosen[i].loc })
+        keep.push(i)
+      }
+      if (keep.length < chosen.length) {
+        toast(`${chosen.length - keep.length} 張照片拿不到，影片裡先不放`, 3500)
+        plan = planVideo(input.days.length, keep.map((i) => chosen[i].day), length)
+      }
+      setRecDuration(plan.duration)
+      setRecording(0)
+      const r = await recordVideo(input, plan, srcs, {
         signal: ac.signal,
+        onPreparing: (done, total) => setPreparing(`整理照片 ${done} / ${total}`),
         onCanvas: (c) => {
+          setPreparing(null)
           c.className = 'live-canvas'
           liveRef.current?.replaceChildren(c)
         },
@@ -712,6 +772,7 @@ function PosterPage({ id }: { id: string }) {
     } finally {
       liveRef.current?.replaceChildren()
       setRecording(null)
+      setPreparing(null)
       abortRef.current = null
     }
   }
@@ -724,7 +785,7 @@ function PosterPage({ id }: { id: string }) {
     )
   const name = data?.trip.name ?? ''
   const canVideo = canRecordVideo()
-  const isRecording = recording != null
+  const isRecording = recording != null || preparing != null
 
   return (
     <div className="page no-tabbar poster-page">
@@ -768,7 +829,10 @@ function PosterPage({ id }: { id: string }) {
         {mode === 'video' && (
           <div className="kv">
             <span>長度</span>
-            <div className="segmented small three" role="group" aria-label="長度">
+            <div className="segmented small four" role="group" aria-label="長度">
+              <button aria-pressed={length === 'auto'} disabled={isRecording} onClick={() => setLength('auto')}>
+                自動判斷
+              </button>
               {VIDEO_LENGTHS.map((n) => (
                 <button key={n} aria-pressed={length === n} disabled={isRecording} onClick={() => setLength(n)}>
                   {n} 秒
@@ -824,11 +888,9 @@ function PosterPage({ id }: { id: string }) {
       ) : isRecording ? (
         <div className="rec-progress" role="status">
           <div className="meter">
-            <span style={{ width: `${(recording / length) * 100}%` }} />
+            <span style={{ width: `${recording != null && recDuration ? (recording / recDuration) * 100 : 0}%` }} />
           </div>
-          <span>
-            錄製中 {recording} / {length} 秒，請停在這個畫面
-          </span>
+          <span>{preparing ?? `錄製中 ${formatSec(recording ?? 0)} / ${formatSec(recDuration)}，請停在這個畫面`}</span>
           <button className="btn-text" onClick={() => abortRef.current?.abort()}>
             取消
           </button>
@@ -850,7 +912,7 @@ function PosterPage({ id }: { id: string }) {
         <>
           <button className="btn-primary" disabled={busy} onClick={record}>
             <Icon name="camera" size={20} />
-            錄製影片（約 {length} 秒）
+            {length === 'auto' ? '錄製影片（依照片張數決定長度）' : `錄製影片（約 ${length} 秒）`}
           </button>
           <p className="hint" style={{ textAlign: 'center' }}>
             錄的時候要停在這個畫面，螢幕不要關
