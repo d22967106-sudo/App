@@ -198,7 +198,7 @@ def oldmap():
     m = fbm(H, W, [W // 3, W // 8, W // 20, W // 50], rng, 0.6)
     g = rng.normal(0, 1, (H, W)).astype(np.float32)
     g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)), np.float32) / 128 - 1
-    a = 0.5 + m * 0.12 + g * 0.06  # 泛黃程度（越不透明越褪色）
+    a = 0.32 + m * 0.1 + g * 0.06  # 泛黃程度（越不透明越褪色）
     col = np.zeros((H, W, 3), np.float32) + np.array([176, 140, 92], np.float32)
     col = col * (1 + m[..., None] * 0.15 + g[..., None] * 0.08)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)

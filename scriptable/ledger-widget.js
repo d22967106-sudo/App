@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.5
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.6
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,7 +27,7 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 3
+const ART_VER = 4
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
@@ -270,6 +270,315 @@ async function drawTiles(dc, z, left, top, w, h, ppx = TILE_PT) {
   return tiles
 }
 
+// ── 古地圖：抓 OpenFreeMap 的向量圖磚（道路、河流、海岸、地名的座標），自己用褐色墨水畫 ──
+const VT_JSON = 'https://tiles.openfreemap.org/planet'
+const VT_MAX = 14 // 向量圖磚最細到 14 層，更近就放大畫（線條仍然清楚）
+const VT_KEEP_DAYS = 30
+
+/** 向量圖磚網址（從 TileJSON 讀，存一天） */
+async function vtTemplate() {
+  const fm = FileManager.local()
+  const file = fm.joinPath(fm.cacheDirectory(), 'ledger-vt.json')
+  if (fm.fileExists(file) && Date.now() - fm.modificationDate(file).getTime() < 86400000) {
+    try {
+      return JSON.parse(fm.readString(file)).tiles[0]
+    } catch {}
+  }
+  try {
+    const req = new Request(VT_JSON)
+    req.timeoutInterval = 10
+    const j = await req.loadJSON()
+    if (!j.tiles || !j.tiles[0]) throw new Error('no tiles')
+    fm.writeString(file, JSON.stringify({ tiles: j.tiles }))
+    return j.tiles[0]
+  } catch {
+    if (fm.fileExists(file)) return JSON.parse(fm.readString(file)).tiles[0]
+    return null
+  }
+}
+
+/** 下載（或從手機讀）一塊向量圖磚，回傳 bytes */
+async function loadVT(z, x, y) {
+  const fm = FileManager.local()
+  const dir = fm.joinPath(fm.cacheDirectory(), 'ledger-vt')
+  if (!fm.fileExists(dir)) fm.createDirectory(dir, true)
+  const file = fm.joinPath(dir, `${z}-${x}-${y}.pbf`)
+  if (fm.fileExists(file) && Date.now() - fm.modificationDate(file).getTime() < VT_KEEP_DAYS * 86400000) {
+    const d = fm.read(file)
+    if (d) return d.getBytes()
+  }
+  const tpl = await vtTemplate()
+  if (!tpl) return null
+  try {
+    const req = new Request(tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y))
+    req.timeoutInterval = 10
+    const data = await req.load()
+    if (req.response.statusCode !== 200) throw new Error(String(req.response.statusCode))
+    fm.write(file, data)
+    return data.getBytes()
+  } catch {
+    if (fm.fileExists(file)) return fm.read(file).getBytes()
+    return null
+  }
+}
+
+/** 最小的 protobuf／Mapbox Vector Tile 解碼（只讀需要的圖層） */
+function utf8(b, s, e) {
+  let out = ''
+  for (let i = s; i < e; ) {
+    let c = b[i++]
+    if (c >= 0xf0) c = ((c & 7) << 18) | ((b[i++] & 63) << 12) | ((b[i++] & 63) << 6) | (b[i++] & 63)
+    else if (c >= 0xe0) c = ((c & 15) << 12) | ((b[i++] & 63) << 6) | (b[i++] & 63)
+    else if (c >= 0xc0) c = ((c & 31) << 6) | (b[i++] & 63)
+    out += String.fromCodePoint(c)
+  }
+  return out
+}
+function decodeVT(b, want) {
+  let pos = 0
+  const varint = () => {
+    let r = 0
+    let m = 1
+    let c
+    do {
+      c = b[pos++]
+      r += (c & 127) * m
+      m *= 128
+    } while (c >= 128)
+    return r
+  }
+  const skip = (wt) => {
+    if (wt === 0) varint()
+    else if (wt === 1) pos += 8
+    else if (wt === 2) {
+      const l = varint()
+      pos += l
+    }
+    else if (wt === 5) pos += 4
+  }
+  const zz = (n) => (n % 2 ? -(n + 1) / 2 : n / 2)
+  const layers = {}
+  while (pos < b.length) {
+    const key = varint()
+    if (key >> 3 !== 3 || (key & 7) !== 2) {
+      skip(key & 7)
+      continue
+    }
+    const end = varint() + pos
+    let name = ''
+    const keys = []
+    const vals = []
+    const feats = []
+    let extent = 4096
+    const lstart = pos
+    // 先讀名字，不需要的圖層直接跳過
+    while (pos < end) {
+      const k = varint()
+      if (k >> 3 === 1) {
+        const l = varint()
+        name = utf8(b, pos, pos + l)
+        pos += l
+        break
+      }
+      skip(k & 7)
+    }
+    if (!want.includes(name)) {
+      pos = end
+      continue
+    }
+    pos = lstart
+    while (pos < end) {
+      const k = varint()
+      const f = k >> 3
+      if (f === 2) {
+        const fe = varint() + pos
+        const feat = { tags: [], type: 0, geom: [] }
+        while (pos < fe) {
+          const fk = varint()
+          const ff = fk >> 3
+          if (ff === 2 || ff === 4) {
+            const pe = varint() + pos
+            const arr = ff === 2 ? feat.tags : feat.geom
+            while (pos < pe) arr.push(varint())
+          } else if (ff === 3) feat.type = varint()
+          else skip(fk & 7)
+        }
+        feats.push(feat)
+      } else if (f === 3) {
+        const l = varint()
+        keys.push(utf8(b, pos, pos + l))
+        pos += l
+      } else if (f === 4) {
+        const ve = varint() + pos
+        let v = null
+        while (pos < ve) {
+          const vk = varint()
+          const vf = vk >> 3
+          if (vf === 1) {
+            const l = varint()
+            v = utf8(b, pos, pos + l)
+            pos += l
+          } else if (vf === 4 || vf === 5) v = varint()
+          else if (vf === 6) v = zz(varint())
+          else if (vf === 7) v = !!varint()
+          else skip(vk & 7)
+        }
+        vals.push(v)
+      } else if (f === 5) extent = varint()
+      else skip(k & 7)
+    }
+    layers[name] = feats.map((ft) => {
+      const props = {}
+      for (let i = 0; i < ft.tags.length; i += 2) props[keys[ft.tags[i]]] = vals[ft.tags[i + 1]]
+      // 幾何：MoveTo／LineTo／ClosePath
+      const rings = []
+      let ring = null
+      let x = 0
+      let y = 0
+      for (let i = 0; i < ft.geom.length; ) {
+        const cmd = ft.geom[i] & 7
+        const cnt = ft.geom[i] >> 3
+        i++
+        if (cmd === 7) {
+          if (ring && ring.length) ring.push(ring[0])
+          continue
+        }
+        for (let j = 0; j < cnt; j++) {
+          x += zz(ft.geom[i++])
+          y += zz(ft.geom[i++])
+          if (cmd === 1) {
+            ring = []
+            rings.push(ring)
+          }
+          ring.push([x / extent, y / extent])
+        }
+      }
+      return { type: ft.type, props, rings }
+    })
+  }
+  return layers
+}
+
+const VT_LAYERS = ['water', 'waterway', 'transportation', 'boundary', 'place', 'park']
+const ROAD_W = { motorway: 1.7, trunk: 1.6, primary: 1.4, secondary: 1.15, tertiary: 0.95, minor: 0.6, service: 0.4, path: 0.35, track: 0.35, rail: 0.7 }
+
+/**
+ * 在 dc 上畫古地圖：羊皮紙底、海岸線加陰影線、河、褐色墨水道路（大路是雙線）、斜體地名。
+ * center＝[緯度, 經度] 畫在 (ax, ay)；zr＝要畫的縮放層級；ppx＝1 個 zr 層像素是幾點。
+ * blur＝鏡片外的糊版本（線條粗而淡、地名糊）。回傳有沒有成功畫出東西。
+ */
+async function drawAntique(dc, center, zr, ax, ay, w, h, ppx, blur = false) {
+  const zt = Math.max(0, Math.min(VT_MAX, Math.floor(zr)))
+  const k = 2 ** (zr - zt) // zt 層的 1 像素＝zr 層的 k 像素
+  const q = worldPx(center[0], center[1], zr)
+  const left = q.x - ax / ppx
+  const top = q.y - ay / ppx
+  const x0 = Math.floor(left / k / 256)
+  const x1 = Math.floor((left + w / ppx) / k / 256)
+  const y0 = Math.floor(top / k / 256)
+  const y1 = Math.floor((top + h / ppx) / k / 256)
+  if ((x1 - x0 + 1) * (y1 - y0 + 1) > 9) return false
+  const tiles = []
+  const n = 2 ** zt
+  for (let ty = y0; ty <= y1; ty++)
+    for (let tx = x0; tx <= x1; tx++) {
+      if (ty < 0 || ty >= n) continue
+      const bytes = await loadVT(zt, ((tx % n) + n) % n, ty)
+      if (bytes) tiles.push({ tx, ty, l: decodeVT(bytes, VT_LAYERS) })
+    }
+  if (!tiles.length) return false
+  const pt = (t, c) => new Point(((t.tx + c[0]) * 256 * k - left) * ppx, ((t.ty + c[1]) * 256 * k - top) * ppx)
+  const each = (layer, fn) => {
+    for (const t of tiles) for (const f of t.l[layer] || []) fn(f, t)
+  }
+  const ink = (a) => new Color('#2A140A', a)
+  const stroke = (pts, width, color) => {
+    if (pts.length < 2) return
+    const p = new Path()
+    p.addLines(pts)
+    dc.addPath(p)
+    dc.setStrokeColor(color)
+    dc.setLineWidth(width)
+    dc.strokePath()
+  }
+  // 羊皮紙底
+  dc.setFillColor(new Color('#E8D9B8'))
+  dc.fillRect(new Rect(0, 0, w, h))
+  const wide = blur ? 2.2 : 1
+  // 公園：淡淡的斑點色
+  each('park', (f, t) => {
+    if (f.type !== 3) return
+    const p = new Path()
+    for (const r of f.rings) p.addLines(r.map((c) => pt(t, c)))
+    dc.addPath(p)
+    dc.setFillColor(new Color('#C9B98E', 0.35))
+    dc.fillPath()
+  })
+  // 水：稍深的底色＋海岸線一圈圈往外淡掉（舊地圖的陰影線感）
+  each('water', (f, t) => {
+    if (f.type !== 3) return
+    const rings = f.rings.map((r) => r.map((c) => pt(t, c)))
+    const p = new Path()
+    for (const r of rings) p.addLines(r)
+    dc.addPath(p)
+    dc.setFillColor(new Color('#D6C49C'))
+    dc.fillPath()
+    for (const r of rings) {
+      for (const [lw, a] of [[7 * wide, 0.05], [4 * wide, 0.08], [2.2 * wide, 0.12]]) stroke(r, lw, ink(a))
+      stroke(r, (blur ? 2 : 0.9) * 1, ink(blur ? 0.25 : 0.8))
+    }
+  })
+  each('waterway', (f, t) => {
+    for (const r of f.rings) stroke(r.map((c) => pt(t, c)), (f.props.class === 'river' ? 1.4 : 0.6) * wide, ink(blur ? 0.25 : 0.6))
+  })
+  each('boundary', (f, t) => {
+    if ((f.props.admin_level || 99) > 6) return
+    for (const r of f.rings) stroke(r.map((c) => pt(t, c)), 0.8 * wide, ink(blur ? 0.15 : 0.35))
+  })
+  // 道路：大路畫成雙線（墨線＋中間紙色），小路單線
+  const roads = []
+  each('transportation', (f, t) => {
+    if (f.type !== 2) return
+    const wdt = ROAD_W[f.props.class]
+    if (!wdt) return
+    if ((zr < 13 || blur) && wdt < 0.9) return // 遠看、糊的版本只畫大路
+    for (const r of f.rings) roads.push({ pts: r.map((c) => pt(t, c)), wdt, cls: f.props.class })
+  })
+  const zs = Math.max(0.6, Math.min(1.6, 2 ** ((zr - 15) / 2)))
+  for (const r of roads) {
+    const lw = r.wdt * zs * wide
+    if (blur) {
+      stroke(r.pts, lw * 4, ink(0.05))
+      stroke(r.pts, lw * 2.2, ink(0.07))
+    }
+    else if (r.wdt >= 1.1) stroke(r.pts, lw * 2.1, ink(0.92))
+    else stroke(r.pts, lw, ink(0.78))
+  }
+  if (!blur) for (const r of roads) if (r.wdt >= 1.1) stroke(r.pts, r.wdt * zs * 1.1, new Color('#EBDDBD'))
+  // 地名：斜體襯線字（糊版本畫幾次錯開、很淡）
+  const shown = []
+  each('place', (f, t) => {
+    const name = f.props['name:zh'] || f.props.name_zh || f.props.name
+    if (!name || f.type !== 1 || !f.rings[0]) return
+    const c = pt(t, f.rings[0][0])
+    if (c.x < -20 || c.y < 0 || c.x > w + 20 || c.y > h) return
+    if (shown.some((s) => Math.abs(s.x - c.x) < 40 && Math.abs(s.y - c.y) < 14)) return
+    shown.push(c)
+    const big = ['city', 'town'].includes(f.props.class)
+    dc.setFont(serif(big ? 11 : 8.5, 'Italic'))
+    dc.setTextAlignedCenter()
+    const r = new Rect(c.x - 40, c.y - 6, 80, 14)
+    if (blur) {
+      dc.setTextColor(ink(0.18))
+      for (const [ox, oy] of [[-0.8, 0], [0.8, 0], [0, -0.8], [0, 0.8]]) dc.drawTextInRect(name, new Rect(r.x + ox, r.y + oy, r.width, r.height))
+    } else {
+      dc.setTextColor(ink(0.95))
+      dc.drawTextInRect(name, r)
+    }
+  })
+  return true
+}
+
 // ── 地圖卡片：模糊的地圖上放一支放大鏡，鏡片裡是清楚的地圖 ──
 // 放大鏡圖（magnifier.png）跟卡片一樣大，位置要跟 make-widget-art.py 的 CARD、LENS 一樣
 const CARD = { w: 140, h: 132 }
@@ -415,12 +724,14 @@ async function cardBackground(view) {
   dc.setFillColor(C.tile)
   dc.fillRect(new Rect(0, 0, w, h))
   const bz = Math.max(1, view.z - 2) // 外面看到的範圍比鏡片大 4 倍
-  const dz = Math.max(0, bz - 4)
+  // 先試古地圖（向量）；抓不到就用一般圖磚放大變糊
+  const antique = await drawAntique(dc, view.center, bz, cx, cy, w, h, TILE_PT, true)
+  const dz = antique ? bz : Math.max(0, bz - 4)
   const ppx = TILE_PT * 2 ** (bz - dz)
   const q = worldPx(view.center[0], view.center[1], dz)
   const left = q.x - cx / ppx
   const top = q.y - cy / ppx
-  await drawTiles(dc, dz, left, top, w, h, ppx)
+  if (!antique) await drawTiles(dc, dz, left, top, w, h, ppx)
   // 鏡片外也看得到路線（糊的）
   if (view.route) {
     blurryRoute(dc, view.route.map((p) => {
@@ -446,7 +757,7 @@ async function lensImage(view) {
   const q = worldPx(view.center[0], view.center[1], view.z)
   const left = q.x - d / 2 / ppx
   const top = q.y - d / 2 / ppx
-  await drawTiles(dc, view.z, left, top, d, d, ppx)
+  if (!(await drawAntique(dc, view.center, view.z, d / 2, d / 2, d, d, ppx))) await drawTiles(dc, view.z, left, top, d, d, ppx)
   await ageMap(dc, LENS.cx - LENS.r, LENS.cy - LENS.r, d, d)
   const toPt = (p) => {
     const w = worldPx(p[0], p[1], view.z)
@@ -519,7 +830,7 @@ function infoRow(stack, d, stale) {
   row.centerAlignContent()
   let any = false
   if (d.steps != null) {
-    iconText(row, 'figure.walk', d.steps.toLocaleString('en-US'), 10, C.sub)
+    iconText(row, 'shoeprints.fill', d.steps.toLocaleString('en-US'), 10, C.sub)
     any = true
   }
   if (d.lastTime) {
