@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-21.2
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.1
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -21,7 +21,21 @@ const C = {
   soft: new Color('#F6E7D6'),
   border: new Color('#E5D3BF'),
   over: new Color('#B5473A'),
+  tile: new Color('#EEDFCC'),
+  bgTop: new Color('#FBF6EF'),
+  bgBottom: new Color('#F2E5D3'),
 }
+
+/** 小工具背景：上淺下深的奶茶色漸層 */
+function paintBg(w) {
+  const g = new LinearGradient()
+  g.colors = [C.bgTop, C.bgBottom]
+  g.locations = [0, 1]
+  w.backgroundGradient = g
+}
+
+const WEEK = '日一二三四五六'
+const dayLabel = (d = new Date()) => `${d.getMonth() + 1}/${d.getDate()} 週${WEEK[d.getDay()]}`
 
 const pad = (n) => String(n).padStart(2, '0')
 const dateKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -62,16 +76,33 @@ async function loadPhoto(id) {
 
 function text(stack, s, size, color, bold = false) {
   const t = stack.addText(s)
-  t.font = bold ? Font.boldSystemFont(size) : Font.systemFont(size)
+  t.font = bold === 'round' ? Font.boldRoundedSystemFont(size) : bold ? Font.boldSystemFont(size) : Font.systemFont(size)
   t.textColor = color
   t.lineLimit = 1
   t.minimumScaleFactor = 0.6
   return t
 }
 
+/** SF Symbols 小圖示＋文字 */
+function iconText(stack, symbol, s, size, color) {
+  const row = stack.addStack()
+  row.layoutHorizontally()
+  row.centerAlignContent()
+  const sym = SFSymbol.named(symbol)
+  if (sym) {
+    sym.applyFont(Font.mediumSystemFont(size))
+    const img = row.addImage(sym.image)
+    img.imageSize = new Size(size + 1, size + 1)
+    img.tintColor = color
+    row.addSpacer(3)
+  }
+  text(row, s, size, color)
+  return row
+}
+
 /** 本月預算進度條 */
 function budgetBar(width, used) {
-  const h = 8
+  const h = 6
   const dc = new DrawContext()
   dc.size = new Size(width, h)
   dc.opaque = false
@@ -118,30 +149,6 @@ async function placeName(d) {
   return d.lastPlace ? d.lastPlace.name : ''
 }
 
-/** 還沒移動時：右邊改成文字卡片 */
-function stillCard(stack, size, name, hasRoute) {
-  const card = stack.addStack()
-  card.size = new Size(size, size)
-  card.cornerRadius = 14
-  card.backgroundColor = new Color('#EEDFCC')
-  card.layoutVertically()
-  card.setPadding(10, 10, 10, 10)
-  card.addSpacer()
-  if (hasRoute) {
-    text(card, '今天在', 11, C.sub)
-    const t = card.addText(name || '同一個地方')
-    t.font = Font.boldSystemFont(15)
-    t.textColor = C.text
-    t.lineLimit = 3
-    t.minimumScaleFactor = 0.6
-  } else {
-    const t = card.addText('今天還沒有軌跡')
-    t.font = Font.systemFont(12)
-    t.textColor = C.sub
-  }
-  card.addSpacer()
-}
-
 // ── 路線縮圖的底圖：OpenStreetMap 圖磚（跟 App 的「OSM 奶茶」一樣，再蓋一層奶茶色） ──
 const TILE_URL = 'https://tile.openstreetmap.org'
 /** 圖磚存在手機上幾天（同一塊不重複下載，OSM 圖磚使用規範要求快取） */
@@ -179,6 +186,57 @@ async function loadTile(z, x, y) {
   }
 }
 
+/** 在 dc 上畫第 z 層、左上角為世界像素 (left, top) 的底圖，回傳畫了幾塊圖磚 */
+async function drawTiles(dc, z, left, top, size) {
+  let tiles = 0
+  const n = 2 ** z
+  const span = size / TILE_PT
+  for (let ty = Math.floor(top / 256); ty <= Math.floor((top + span) / 256); ty++) {
+    for (let tx = Math.floor(left / 256); tx <= Math.floor((left + span) / 256); tx++) {
+      if (ty < 0 || ty >= n) continue
+      const img = await loadTile(z, ((tx % n) + n) % n, ty)
+      if (!img) continue
+      dc.drawImageInRect(img, new Rect((tx * 256 - left) * TILE_PT, (ty * 256 - top) * TILE_PT, 256 * TILE_PT, 256 * TILE_PT))
+      tiles++
+    }
+  }
+  if (tiles) {
+    // 奶茶色濾鏡（DrawContext 沒有 multiply，用半透明色蓋一層）
+    dc.setFillColor(new Color('#E9D3B8', 0.42))
+    dc.fillRect(new Rect(0, 0, size, size))
+  }
+  return tiles
+}
+
+/** 目前位置的圓點（外圈光暈＋白邊） */
+function drawPin(dc, pt) {
+  const circle = (r, color) => {
+    dc.setFillColor(color)
+    dc.fillEllipse(new Rect(pt.x - r, pt.y - r, r * 2, r * 2))
+  }
+  circle(14, new Color('#A0612B', 0.18))
+  circle(7.5, Color.white())
+  circle(5.5, C.primary)
+}
+
+/** 還沒移動時的右邊卡片底圖：以目前位置為中心的地圖＋圓點（點放在上半部，下面留給地名） */
+async function placeImage(p, size) {
+  const dc = new DrawContext()
+  dc.size = new Size(size, size)
+  dc.respectScreenScale = true
+  dc.opaque = false
+  dc.setFillColor(C.tile)
+  dc.fillRect(new Rect(0, 0, size, size))
+  const z = 16
+  const q = worldPx(p[0], p[1], z)
+  const pinY = size * 0.32
+  const left = q.x - size / TILE_PT / 2
+  const top = q.y - pinY / TILE_PT
+  await drawTiles(dc, z, left, top, size)
+  drawPin(dc, new Point(size / 2, pinY))
+  return dc.getImage()
+}
+
 /** 今天路線縮圖（有地圖底圖；圖磚載不到就只畫路線） */
 async function routeImage(route, size) {
   const dc = new DrawContext()
@@ -188,7 +246,7 @@ async function routeImage(route, size) {
   const bg = new Path()
   bg.addRoundedRect(new Rect(0, 0, size, size), 14, 14)
   dc.addPath(bg)
-  dc.setFillColor(new Color('#EEDFCC'))
+  dc.setFillColor(C.tile)
   dc.fillPath()
   if (!route || route.length === 0) {
     dc.setTextColor(C.sub)
@@ -205,32 +263,17 @@ async function routeImage(route, size) {
     px = route.map((p) => worldPx(p[0], p[1], z))
     const w = Math.max(...px.map((q) => q.x)) - Math.min(...px.map((q) => q.x))
     const h = Math.max(...px.map((q) => q.y)) - Math.min(...px.map((q) => q.y))
-    if (Math.max(w, h) * TILE_PT <= size - m * 2) break
+    if (Math.max(w, h) * TILE_PT <= size - m * 2 - 10) break
   }
   const cx = (Math.max(...px.map((q) => q.x)) + Math.min(...px.map((q) => q.x))) / 2
-  const cy = (Math.max(...px.map((q) => q.y)) + Math.min(...px.map((q) => q.y))) / 2
+  // 往下挪 10 點（路線畫高一點），下面留給「今天 ○ km」標籤
+  const cy = (Math.max(...px.map((q) => q.y)) + Math.min(...px.map((q) => q.y))) / 2 + 10 / TILE_PT
   const half = size / TILE_PT / 2
   const left = cx - half
   const top = cy - half
   const toPt = (q) => new Point((q.x - left) * TILE_PT, (q.y - top) * TILE_PT)
 
-  // 底圖
-  let tiles = 0
-  const n = 2 ** z
-  for (let ty = Math.floor(top / 256); ty <= Math.floor((top + half * 2) / 256); ty++) {
-    for (let tx = Math.floor(left / 256); tx <= Math.floor((left + half * 2) / 256); tx++) {
-      if (ty < 0 || ty >= n) continue
-      const img = await loadTile(z, ((tx % n) + n) % n, ty)
-      if (!img) continue
-      dc.drawImageInRect(img, new Rect((tx * 256 - left) * TILE_PT, (ty * 256 - top) * TILE_PT, 256 * TILE_PT, 256 * TILE_PT))
-      tiles++
-    }
-  }
-  if (tiles) {
-    // 奶茶色濾鏡（DrawContext 沒有 multiply，用半透明色蓋一層）
-    dc.setFillColor(new Color('#E9D3B8', 0.42))
-    dc.fillRect(new Rect(0, 0, size, size))
-  }
+  const tiles = await drawTiles(dc, z, left, top, size)
 
   const pts = px.map(toPt)
   if (pts.length > 1) {
@@ -252,20 +295,19 @@ async function routeImage(route, size) {
   }
   dot(pts[0], Color.white(), 5.5)
   dot(pts[0], C.dark, 4)
-  dot(pts[pts.length - 1], Color.white(), 5)
-  dot(pts[pts.length - 1], C.primary, 3.5)
+  drawPin(dc, pts[pts.length - 1])
   if (tiles) {
     dc.setTextColor(new Color('#3A2618', 0.7))
     dc.setFont(Font.systemFont(7))
     dc.setTextAlignedRight()
-    dc.drawTextInRect('© OpenStreetMap', new Rect(0, size - 11, size - 6, 10))
+    dc.drawTextInRect('© OpenStreetMap', new Rect(0, 3, size - 7, 10))
   }
   return dc.getImage()
 }
 
 function errorWidget(msg) {
   const w = new ListWidget()
-  w.backgroundColor = C.bg
+  paintBg(w)
   text(w, '摳摳手帳', 13, C.primary, true)
   w.addSpacer(6)
   const t = w.addText(msg)
@@ -274,65 +316,173 @@ function errorWidget(msg) {
   return w
 }
 
-function monthLine(stack, d, width) {
+/** 今天走了多遠（公里） */
+function routeKm(route) {
+  let m = 0
+  for (let i = 1; i < (route || []).length; i++) m += distanceM(route[i - 1], route[i])
+  return m / 1000
+}
+
+/** 第一列：「今日支出」＋右邊日期 */
+function headerRow(stack) {
+  const row = stack.addStack()
+  row.layoutHorizontally()
+  row.centerAlignContent()
+  text(row, '今日支出', 12, C.sub)
+  row.addSpacer()
+  const chip = row.addStack()
+  chip.backgroundColor = C.soft
+  chip.cornerRadius = 7
+  chip.setPadding(2, 6, 2, 6)
+  text(chip, dayLabel(), 10, C.dark, true)
+}
+
+/** 金額下面的小字：今天幾筆紀錄 */
+function countLine(stack, d) {
+  const n = d.todayCount || 0
+  text(stack, n ? `今天 ${n} 筆紀錄` : '今天還沒記帳', 10, C.sub)
+}
+
+/** 本月：金額（＋預算剩多少、進度條） */
+function monthBlock(stack, d, width) {
+  const row = stack.addStack()
+  row.layoutHorizontally()
+  row.bottomAlignContent()
+  text(row, '本月', 11, C.sub)
+  row.addSpacer(4)
+  text(row, money(d.monthExpense), 13, C.text, true)
   if (BUDGET > 0) {
-    const pct = Math.round((d.monthExpense / BUDGET) * 100)
-    text(stack, `本月 ${money(d.monthExpense)} / ${money(BUDGET)}（${pct}%）`, 11, C.sub)
+    row.addSpacer()
+    const left = BUDGET - d.monthExpense
+    text(row, left >= 0 ? `剩 ${money(left)}` : `超出 ${money(-left)}`, 10, left >= 0 ? C.sub : C.over)
     stack.addSpacer(4)
     const img = stack.addImage(budgetBar(width, d.monthExpense))
-    img.imageSize = new Size(width, 8)
+    img.imageSize = new Size(width, 6)
+  }
+}
+
+/** 最下面一列：步數、最後定位時間、離線 */
+function infoRow(stack, d, stale) {
+  const row = stack.addStack()
+  row.layoutHorizontally()
+  row.centerAlignContent()
+  let any = false
+  if (d.steps != null) {
+    iconText(row, 'figure.walk', d.steps.toLocaleString('en-US'), 10, C.sub)
+    any = true
+  }
+  if (d.lastTime) {
+    if (any) row.addSpacer(8)
+    iconText(row, 'location.fill', hm(d.lastTime), 10, C.sub)
+    any = true
+  }
+  if (stale) {
+    if (any) row.addSpacer(8)
+    iconText(row, 'wifi.slash', '離線', 10, C.over)
+  }
+}
+
+/** 右邊卡片上的白底標籤 */
+function cardLabel(card, top, main, mainSize) {
+  const label = card.addStack()
+  label.layoutVertically()
+  label.backgroundColor = new Color('#FFFBF5', 0.92)
+  label.cornerRadius = 9
+  label.setPadding(4, 7, 5, 7)
+  if (top) text(label, top, 9, C.sub)
+  const t = label.addText(main)
+  t.font = Font.boldSystemFont(mainSize)
+  t.textColor = C.text
+  t.lineLimit = 2
+  t.minimumScaleFactor = 0.6
+}
+
+/** 右邊卡片：有移動＝路線；沒移動＝目前位置地圖＋地名；沒有點＝提示 */
+async function rightCard(row, d, size) {
+  const card = row.addStack()
+  card.size = new Size(size, size)
+  card.cornerRadius = 16
+  card.layoutVertically()
+  card.setPadding(6, 6, 6, 6)
+  const route = d.route || []
+  if (moved(route)) {
+    card.backgroundImage = await routeImage(route, size)
+    card.addSpacer()
+    const chipRow = card.addStack()
+    const chip = chipRow.addStack()
+    chipRow.addSpacer()
+    chip.backgroundColor = new Color('#FFFBF5', 0.92)
+    chip.cornerRadius = 8
+    chip.setPadding(3, 6, 3, 6)
+    text(chip, `今天 ${routeKm(route).toFixed(1)} km`, 10, C.text, true)
+  } else if (route.length > 0) {
+    card.backgroundImage = await placeImage(route[route.length - 1], size)
+    card.addSpacer()
+    const lab = card.addStack()
+    lab.layoutHorizontally()
+    cardLabel(lab, '今天在', (await placeName(d)) || '同一個地方', 12)
   } else {
-    text(stack, `本月 ${money(d.monthExpense)}`, 11, C.sub)
+    card.backgroundColor = C.tile
+    card.addSpacer()
+    const r = card.addStack()
+    r.addSpacer()
+    const sym = SFSymbol.named('location.slash')
+    sym.applyFont(Font.systemFont(22))
+    const img = r.addImage(sym.image)
+    img.imageSize = new Size(22, 22)
+    img.tintColor = C.sub
+    r.addSpacer()
+    card.addSpacer(6)
+    const r2 = card.addStack()
+    r2.addSpacer()
+    text(r2, '今天還沒有軌跡', 11, C.sub)
+    r2.addSpacer()
+    card.addSpacer()
   }
 }
 
 async function mediumWidget(d, stale) {
   const w = new ListWidget()
-  w.backgroundColor = C.bg
-  w.setPadding(14, 14, 14, 14)
+  paintBg(w)
+  w.setPadding(14, 16, 14, 14)
   const row = w.addStack()
   row.layoutHorizontally()
+  row.centerAlignContent()
   const left = row.addStack()
   left.layoutVertically()
-  text(left, '今日支出', 12, C.sub)
-  text(left, money(d.todayExpense), 28, C.text, true)
-  left.addSpacer(4)
-  monthLine(left, d, 170)
+  left.size = new Size(160, 128)
+  headerRow(left)
+  left.addSpacer(2)
+  text(left, money(d.todayExpense), 32, C.text, 'round')
+  countLine(left, d)
   left.addSpacer()
-  if (d.steps != null) text(left, `步數 ${d.steps.toLocaleString('en-US')}`, 11, C.sub)
-  if (d.lastPlace) text(left, `最後 ${hm(d.lastPlace.time)} ${d.lastPlace.name}`, 11, C.sub)
-  if (stale) text(left, '（離線，顯示上次資料）', 9, C.sub)
+  monthBlock(left, d, 160)
+  left.addSpacer(7)
+  infoRow(left, d, stale)
   row.addSpacer()
-  if (moved(d.route)) {
-    const img = row.addImage(await routeImage(d.route, 120))
-    img.imageSize = new Size(120, 120)
-    img.cornerRadius = 14
-  } else {
-    stillCard(row, 120, await placeName(d), d.route && d.route.length > 0)
-  }
+  await rightCard(row, d, 128)
   return w
 }
 
 function smallWidget(d, stale) {
   const w = new ListWidget()
-  w.backgroundColor = C.bg
+  paintBg(w)
   w.setPadding(14, 14, 14, 14)
-  text(w, '今日支出', 12, C.sub)
-  text(w, money(d.todayExpense), 26, C.text, true)
+  headerRow(w)
+  w.addSpacer(2)
+  text(w, money(d.todayExpense), 28, C.text, 'round')
+  countLine(w, d)
   w.addSpacer()
-  monthLine(w, d, 120)
-  if (d.steps != null) {
-    w.addSpacer(4)
-    text(w, `步數 ${d.steps.toLocaleString('en-US')}`, 11, C.sub)
-  }
-  if (stale) text(w, '離線', 9, C.sub)
+  monthBlock(w, d, 126)
+  w.addSpacer(6)
+  infoRow(w, d, stale)
   return w
 }
 
 async function yearAgoWidget(d) {
   const ya = d.yearAgo
   const w = new ListWidget()
-  w.backgroundColor = C.bg
+  paintBg(w)
   w.setPadding(12, 12, 12, 12)
   const photo = ya.photoId ? await loadPhoto(ya.photoId) : null
   if (photo) {
