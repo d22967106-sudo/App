@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.4
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.5
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,7 +27,7 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 2
+const ART_VER = 3
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
@@ -270,13 +270,6 @@ async function drawTiles(dc, z, left, top, w, h, ppx = TILE_PT) {
   return tiles
 }
 
-/** 目前位置的圓點（外圈光暈＋白邊） */
-function drawPin(dc, pt) {
-  circle(dc, pt.x, pt.y, 10, new Color('#7A3A14', 0.2))
-  circle(dc, pt.x, pt.y, 5.5, new Color('#F6EEDF'))
-  circle(dc, pt.x, pt.y, 3.8, new Color('#8E3B1C'))
-}
-
 // ── 地圖卡片：模糊的地圖上放一支放大鏡，鏡片裡是清楚的地圖 ──
 // 放大鏡圖（magnifier.png）跟卡片一樣大，位置要跟 make-widget-art.py 的 CARD、LENS 一樣
 const CARD = { w: 140, h: 132 }
@@ -304,12 +297,83 @@ function mapView(route) {
   return { center: route[route.length - 1], z: 16, route: null, pin: true }
 }
 
-/** 舊地圖色調：泛黃、降低飽和 */
-function ageMap(dc, w, h, strength = 1) {
-  dc.setFillColor(new Color('#C8AF86', 0.42 * strength))
+/** 老地圖效果：蓋上 oldmap.png（泛黃褪色、紙紋、摺痕、四周變暗）；(ox, oy) 是這張圖在卡片上的位置。下載不到就蓋一層泛黃色 */
+async function ageMap(dc, ox, oy, w, h) {
+  const over = await loadArt('oldmap.png')
+  if (over) {
+    dc.drawImageInRect(over, new Rect(-ox, -oy, CARD.w, CARD.h))
+    return
+  }
+  dc.setFillColor(new Color('#B08C5C', 0.5))
   dc.fillRect(new Rect(0, 0, w, h))
-  dc.setFillColor(new Color('#4A2E16', 0.07 * strength))
-  dc.fillRect(new Rect(0, 0, w, h))
+}
+
+/** 把點連成平滑的曲線（Chaikin），筆畫起來比較順 */
+function smooth(pts, times = 2) {
+  let p = pts
+  for (let t = 0; t < times && p.length > 2; t++) {
+    const out = [p[0]]
+    for (let i = 0; i < p.length - 1; i++) {
+      const a = p[i]
+      const b = p[i + 1]
+      out.push(new Point(a.x * 0.75 + b.x * 0.25, a.y * 0.75 + b.y * 0.25), new Point(a.x * 0.25 + b.x * 0.75, a.y * 0.25 + b.y * 0.75))
+    }
+    out.push(p[p.length - 1])
+    p = out
+  }
+  return p
+}
+
+const INK = '#2E170A'
+
+/** 手抖一點的線：每個點沿垂直方向偏一點點 */
+function wobble(pts, amp, seed) {
+  const r = rand(seed)
+  return pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)]
+    const b = pts[Math.min(pts.length - 1, i + 1)]
+    const len = Math.hypot(b.x - a.x, b.y - a.y) || 1
+    const k = (r() - 0.5) * 2 * amp
+    return new Point(p.x - ((b.y - a.y) / len) * k, p.y + ((b.x - a.x) / len) * k)
+  })
+}
+
+function strokeLine(dc, pts, width, color) {
+  const p = new Path()
+  p.addLines(pts)
+  dc.addPath(p)
+  dc.setStrokeColor(color)
+  dc.setLineWidth(width)
+  dc.strokePath()
+}
+
+/** 用鋼筆畫的路線：主線＋一道淡淡的第二筆（墨水不均）＋起點墨點＋終點手畫圈 */
+function inkRoute(dc, pts) {
+  // 先在原本的點上抖一點點，再畫成平滑曲線（像手拿筆描）
+  strokeLine(dc, smooth(wobble(pts, 0.6, 3), 3), 2.1, new Color(INK, 0.88))
+  strokeLine(dc, smooth(wobble(pts, 1.0, 9), 3), 0.9, new Color(INK, 0.4))
+  const s0 = pts[0]
+  circle(dc, s0.x, s0.y, 2.6, new Color(INK, 0.9))
+  inkCircle(dc, pts[pts.length - 1], 6.5)
+}
+
+/** 手畫的圈（轉一圈多一點、頭尾沒接好）＋中間一個墨點 */
+function inkCircle(dc, c, rad) {
+  const r = rand(17)
+  const pts = []
+  for (let i = 0; i <= 30; i++) {
+    const t = -0.6 + (i / 30) * Math.PI * 2.25
+    const rr = rad * (1 + (r() - 0.5) * 0.12 + i * 0.004)
+    pts.push(new Point(c.x + Math.cos(t) * rr, c.y + Math.sin(t) * rr * 0.92))
+  }
+  strokeLine(dc, pts, 1.6, new Color(INK, 0.85))
+  circle(dc, c.x, c.y, 1.8, new Color(INK, 0.9))
+}
+
+/** 鏡片外（模糊地圖上）的路線：好幾層淡淡的粗線疊出糊糊的墨跡 */
+function blurryRoute(dc, pts) {
+  const sm = smooth(pts)
+  for (const [w, a] of [[7, 0.05], [5, 0.07], [3.5, 0.09], [2.2, 0.1]]) strokeLine(dc, sm, w, new Color(INK, a))
 }
 
 /** 右下角的地名小紙片：撕邊的舊紙＋淡淡的影子（畫在卡片底圖上） */
@@ -354,17 +418,17 @@ async function cardBackground(view) {
   const dz = Math.max(0, bz - 4)
   const ppx = TILE_PT * 2 ** (bz - dz)
   const q = worldPx(view.center[0], view.center[1], dz)
-  await drawTiles(dc, dz, q.x - cx / ppx, q.y - cy / ppx, w, h, ppx)
-  ageMap(dc, w, h, 1.15)
-  // 四周暗一點（景深）
-  for (let i = 0; i < 12; i++) {
-    const p = new Path()
-    p.addRoundedRect(new Rect(i, i, w - i * 2, h - i * 2), 14, 14)
-    dc.addPath(p)
-    dc.setStrokeColor(new Color('#2A1A0E', 0.06 * (1 - i / 12)))
-    dc.setLineWidth(1.4)
-    dc.strokePath()
+  const left = q.x - cx / ppx
+  const top = q.y - cy / ppx
+  await drawTiles(dc, dz, left, top, w, h, ppx)
+  // 鏡片外也看得到路線（糊的）
+  if (view.route) {
+    blurryRoute(dc, view.route.map((p) => {
+      const t = worldPx(p[0], p[1], dz)
+      return new Point((t.x - left) * ppx, (t.y - top) * ppx)
+    }))
   }
+  await ageMap(dc, 0, 0, w, h)
   const mag = await loadArt('magnifier.png')
   if (mag) dc.drawImageInRect(mag, new Rect(0, 0, w, h))
   drawTag(dc)
@@ -383,26 +447,13 @@ async function lensImage(view) {
   const left = q.x - d / 2 / ppx
   const top = q.y - d / 2 / ppx
   await drawTiles(dc, view.z, left, top, d, d, ppx)
-  ageMap(dc, d, d, 0.6)
+  await ageMap(dc, LENS.cx - LENS.r, LENS.cy - LENS.r, d, d)
   const toPt = (p) => {
     const w = worldPx(p[0], p[1], view.z)
     return new Point((w.x - left) * ppx, (w.y - top) * ppx)
   }
-  if (view.route) {
-    const pts = view.route.map(toPt)
-    const path = new Path()
-    path.addLines(pts)
-    dc.addPath(path)
-    dc.setStrokeColor(new Color('#F6EEDF', 0.9))
-    dc.setLineWidth(5)
-    dc.strokePath()
-    dc.addPath(path)
-    dc.setStrokeColor(new Color('#8E3B1C'))
-    dc.setLineWidth(2.5)
-    dc.strokePath()
-    circle(dc, pts[0].x, pts[0].y, 3.5, new Color('#4A2A14'))
-    drawPin(dc, pts[pts.length - 1])
-  } else if (view.pin) drawPin(dc, toPt(view.center))
+  if (view.route) inkRoute(dc, view.route.map(toPt))
+  else if (view.pin) inkCircle(dc, toPt(view.center), 8)
   const g = await loadArt('glass.png')
   if (g) dc.drawImageInRect(g, new Rect(0, 0, d, d))
   return dc.getImage()

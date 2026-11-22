@@ -2,12 +2,13 @@
   paper-medium.jpg、paper-small.jpg  復古紙張背景
   magnifier.png                      地圖卡片上的放大鏡（銅框＋木柄＋影子，透明背景，跟卡片一樣大）
   glass.png                          鏡片玻璃的反光與邊緣暗角（透明，蓋在清楚的地圖上）
+  oldmap.png                         老地圖濾鏡（半透明泛黃、斑駁、紙紋、摺痕、四周變暗，蓋在地圖上；跟卡片一樣大）
 用法：python3 scriptable/make-widget-art.py（需要 numpy、Pillow）
 小工具從 App 網址下載這些圖並存在手機上；改了圖要把腳本的 ART_VER 加 1。
 放大鏡的位置大小（CARD、LENS）要跟腳本裡的一樣。
 """
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter
 from pathlib import Path
 
 
@@ -44,7 +45,7 @@ def vintage(w, h, seed=1, S=3, center=(196, 181, 156), edge_strength=1.0):
     g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.7)), np.float32) / 128 - 1
     g2 = fbm(H, W, [9, 5, 3], rng, 0.8)
     m = fbm(H, W, [W // 3, W // 8, W // 20, W // 45], rng, 0.6)
-    lum = 1 + m * 0.045 + g * 0.022 + g2 * 0.012  # 紋路要淡
+    lum = 1 + m * 0.08 + g * 0.1 + g2 * 0.055  # 紋路要明顯
     c = np.array(center, np.float32)
     col = c[None, None, :] * lum[..., None] + np.clip(m, 0, 1)[..., None] * np.array([6, 0, -10], np.float32)
     yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -190,6 +191,45 @@ def glass():
     return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), a * 255]).astype(np.uint8), 'RGBA')
 
 
+def oldmap():
+    """老地圖濾鏡：蓋在彩色地圖上，讓它變成泛黃褪色的舊地圖"""
+    W, H = CARD[0] * S, CARD[1] * S
+    rng = np.random.default_rng(11)
+    m = fbm(H, W, [W // 3, W // 8, W // 20, W // 50], rng, 0.6)
+    g = rng.normal(0, 1, (H, W)).astype(np.float32)
+    g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)), np.float32) / 128 - 1
+    a = 0.5 + m * 0.12 + g * 0.06  # 泛黃程度（越不透明越褪色）
+    col = np.zeros((H, W, 3), np.float32) + np.array([176, 140, 92], np.float32)
+    col = col * (1 + m[..., None] * 0.15 + g[..., None] * 0.08)
+    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
+    # 四周變暗變褐
+    dx = np.abs(xx / W - 0.5) * 2
+    dy = np.abs(yy / H - 0.5) * 2
+    e = np.clip((np.maximum(dx, dy) + fbm(H, W, [W // 10, W // 30], rng) * 0.08 - 0.62) / 0.38, 0, 1) ** 1.5
+    col = col * (1 - e[..., None] * 0.45)
+    a = a + e * 0.3
+    # 摺痕（一直一橫）：一邊亮一邊暗
+    for pos, vertical in [(W * 0.43, True), (H * 0.6, False)]:
+        coord = xx if vertical else yy
+        other = yy if vertical else xx
+        wob = np.sin(other / (40 * S) * 2 * np.pi) * 1.2 * S
+        d = (coord - pos - wob) / S
+        light = np.exp(-((d + 0.6) / 0.5) ** 2)
+        dark = np.exp(-((d - 0.6) / 0.7) ** 2)
+        col = col + light[..., None] * 70 - dark[..., None] * 60
+        a = a + light * 0.15 + dark * 0.15
+    # 小斑點
+    sp = Image.new('L', (W, H), 0)
+    d2 = ImageDraw.Draw(sp)
+    for _ in range(25):
+        x, y, r = rng.random() * W, rng.random() * H, rng.uniform(0.6, 2.2) * S
+        d2.ellipse((x - r, y - r, x + r, y + r), fill=int(rng.uniform(60, 140)))
+    sp = np.asarray(sp.filter(ImageFilter.GaussianBlur(1.2 * S / 3)), np.float32) / 255
+    col = col * (1 - sp[..., None] * 0.5)
+    a = a + sp * 0.3
+    return Image.fromarray(np.dstack([np.clip(col, 0, 255), np.clip(a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+
+
 if __name__ == '__main__':
     out = Path(__file__).resolve().parent.parent / 'public' / 'widget'
     out.mkdir(parents=True, exist_ok=True)
@@ -198,4 +238,5 @@ if __name__ == '__main__':
     vintage(158, 158, seed=3).save(out / 'paper-small.jpg', quality=88)
     magnifier().save(out / 'magnifier.png', optimize=True)
     glass().save(out / 'glass.png', optimize=True)
+    oldmap().save(out / 'oldmap.png', optimize=True)
     print('ok', out)
