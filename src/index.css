@@ -3219,3 +3219,13 @@ button:disabled {
   background: var(--primary-dark);
   color: #fff;
 }
+
+.segmented.small.four {
+  grid-template-columns: repeat(4, auto);
+}
+
+.segmented.small.four button {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
