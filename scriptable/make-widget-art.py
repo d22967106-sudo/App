@@ -5,6 +5,7 @@
   oldmap.png                         老地圖濾鏡（半透明泛黃、斑駁、紙紋、摺痕、四周變暗，蓋在地圖上；跟卡片一樣大）
   mapframe.png                       地圖卡片的撕邊框：撕邊外面是小工具背景紙的同一塊（所以看起來像撕過的地圖放在紙上），
                                      邊緣焦黃、捲角、影子；撕邊裡面透明（下面是地圖）。CARD_POS 要跟腳本的版面一致
+  tag.png                            地圖右下角的卷軸標籤（舊羊皮紙、兩端捲起、雙線墨框、影子；大小要跟腳本的 TAG 一樣）
   glyphs.json                        手寫中文字形（霞鶩文楷 TC，只收腳本裡 GLYPH_SET 那幾個固定出現的字）
                                      需要字體檔：python3 scriptable/make-widget-art.py <LXGWWenKaiTC-Regular.ttf>
                                      （https://github.com/lxgw/LxgwWenkaiTC ，OFL 授權，授權文字一起放在 public/widget/）
@@ -317,6 +318,72 @@ def mapframe():
     return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
 
 
+# ── 卷軸標籤 ──
+TAG = (104, 28)
+
+
+def scroll_tag():
+    W, H = TAG[0] * S, TAG[1] * S
+    rng = np.random.default_rng(31)
+    yy, xx = (np.mgrid[0:H, 0:W].astype(np.float32) + 0.5) / S
+    w, h = TAG
+    roll_w = 6.5
+    # 中間的紙：上下邊微微波浪
+    top = 3.5 + np.sin(xx / 9) * 0.5
+    bot = h - 3.5 + np.sin(xx / 11 + 1) * 0.5
+    sheet = np.clip((yy - top) * S + 0.5, 0, 1) * np.clip((bot - yy) * S + 0.5, 0, 1) * np.clip((xx - roll_w + 1) * S, 0, 1) * np.clip((w - roll_w + 1 - xx) * S, 0, 1)
+    g = rng.normal(0, 1, (H, W)).astype(np.float32)
+    g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)), np.float32) / 128 - 1
+    m = fbm(H, W, [W // 3, W // 8, 10], rng, 0.6)
+    base = np.array([222, 200, 156], np.float32)
+    sheet_rgb = base * (1 + m[..., None] * 0.1 + g[..., None] * 0.05)
+    # 紙的邊緣焦黃
+    ed = np.minimum(np.minimum(yy - top, bot - yy), 99)
+    burn = np.clip(1 - ed / 4.5, 0, 1) ** 1.5 * (0.7 + 0.3 * (m + 1) / 2)
+    sheet_rgb = sheet_rgb * (1 - burn[..., None] * 0.45) + np.array([120, 74, 30], np.float32) * burn[..., None] * 0.45
+    # 雙線墨框
+    ink = np.array([58, 32, 14], np.float32)
+    def rule(inset, width, alpha):
+        x0, x1, y0, y1 = roll_w + inset, w - roll_w - inset, 3.5 + inset, h - 3.5 - inset
+        d = np.minimum.reduce([np.abs(xx - x0) + np.where((yy < y0) | (yy > y1), 99, 0), np.abs(xx - x1) + np.where((yy < y0) | (yy > y1), 99, 0),
+                               np.abs(yy - y0) + np.where((xx < x0) | (xx > x1), 99, 0), np.abs(yy - y1) + np.where((xx < x0) | (xx > x1), 99, 0)])
+        return np.clip((width / 2 - d) * S + 0.5, 0, 1) * alpha
+    r1 = rule(1.4, 0.8, 0.75)
+    r2 = rule(2.6, 0.4, 0.6)
+    for r in (r1, r2):
+        sheet_rgb = sheet_rgb * (1 - r[..., None]) + ink * r[..., None]
+    # 兩端捲起來的紙卷（圓柱光影）
+    def roll(cx):
+        u = np.clip((xx - cx) / (roll_w / 2), -1, 1)
+        cov = np.clip((roll_w / 2 - np.abs(xx - cx)) * S + 0.5, 0, 1) * np.clip((yy - 1.5) * S + 0.5, 0, 1) * np.clip((h - 1.5 - yy) * S + 0.5, 0, 1)
+        nz = np.sqrt(np.clip(1 - u ** 2, 0, 1))
+        light = np.clip(-0.5 * u + 0.8 * nz, 0, 1)
+        col = np.array([200, 172, 124], np.float32)[None, None, :] * (0.55 + 0.6 * light[..., None]) * (1 + g[..., None] * 0.04)
+        # 卷口（上下端的橢圓，看得到捲起來的螺旋）
+        for ey in (1.5, h - 1.5):
+            e = ((xx - cx) / (roll_w / 2)) ** 2 + ((yy - ey) / 1.6) ** 2
+            ring = np.exp(-((np.sqrt(e) - 0.55) / 0.12) ** 2) * (e < 1.2)
+            col = col * (1 - ring[..., None] * 0.5)
+        # 紙卷兩側的焦黃
+        col = col * (1 - (np.abs(u) ** 6)[..., None] * 0.35)
+        return cov, col
+    rgb = sheet_rgb * sheet[..., None]
+    a = sheet.copy()
+    # 紙卷投在紙上的影子
+    for cx, sgn in ((roll_w / 2 + 0.5, 1), (w - roll_w / 2 - 0.5, -1)):
+        shade = np.clip(1 - np.abs(xx - (cx + sgn * roll_w / 2 + sgn * 1.2)) / 2.2, 0, 1) * sheet * 0.35
+        rgb = rgb * (1 - shade[..., None])
+        cov, col = roll(cx)
+        rgb = rgb * (1 - cov[..., None]) + col * cov[..., None]
+        a = np.maximum(a, cov)
+    # 整個標籤的影子
+    sil = Image.fromarray((a * 255).astype(np.uint8))
+    sh = np.asarray(sil.transform((W, H), Image.AFFINE, (1, 0, -1 * S, 0, 1, -1.8 * S)).filter(ImageFilter.GaussianBlur(1.6 * S)), np.float32) / 255 * 0.45
+    out_a = a + sh * (1 - a)
+    out_rgb = (rgb * a[..., None] + np.array([30, 18, 8], np.float32) * (sh * (1 - a))[..., None]) / np.maximum(out_a, 1e-6)[..., None]
+    return Image.fromarray(np.dstack([np.clip(out_rgb, 0, 255), np.clip(out_a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+
+
 # ── 手寫中文字形 ──
 GQ = 5  # 座標精度（字型 1000 單位＝1 em → 200）
 
@@ -417,6 +484,7 @@ if __name__ == '__main__':
     glass().save(out / 'glass.png', optimize=True)
     oldmap().save(out / 'oldmap.png', optimize=True)
     mapframe().save(out / 'mapframe.png', optimize=True)
+    scroll_tag().save(out / 'tag.png', optimize=True)
     import sys, json
     if len(sys.argv) > 1:
         g = glyphs(sys.argv[1], glyph_set())
