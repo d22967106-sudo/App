@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.12
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.13
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,7 +27,7 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 10
+const ART_VER = 11
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
@@ -40,7 +40,7 @@ const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, siz
 /** 這套行書的字形在字框裡畫得比較小、字距寬：畫的時候放大、字距收緊 */
 const CN_SCALE = 1.3
 const CN_TRACK = 0.88
-const GLYPH_SET = '今日支出　共件尚未本月剩超出今天在此走了留足印一年前的花 0123456789$,.km'
+const GLYPH_SET = '今日支出　共件尚未本月剩超出今天在此走了留足印一年前的花 0123456789$,.:km'
 /** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
 const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
@@ -292,7 +292,7 @@ async function iconText(stack, symbol, s, size, color) {
     const img = row.addImage(footprints(size + 7, color))
     img.imageSize = new Size(size + 7, size + 7)
     row.addSpacer(3)
-    text(row, s, size, color, serif(size + 1, 'Regular'))
+    await cnText(row, s, size, color)
     return row
   }
   const sym = SFSymbol.named(symbol)
@@ -303,7 +303,8 @@ async function iconText(stack, symbol, s, size, color) {
     img.tintColor = color
     row.addSpacer(3)
   }
-  text(row, s, size, color, serif(size + 1, 'Regular'))
+  // 時間的數字也用行書字形（跟「今日支出」同一套）
+  if (s) await cnText(row, s, size, color)
   return row
 }
 
