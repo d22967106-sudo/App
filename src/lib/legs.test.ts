@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { dayStays } from './day'
-import { carryPoint, computeLegs, dropWobble, guessMode, withCarry } from './legs'
+import { applyCuts, carryPoint, computeLegs, dropWobble, guessMode, withCarry } from './legs'
 import { decodePolyline, encodePolyline, snapDrawn, snapLeg, spliceLine, thin, tidySnapped } from './snap'
 import { distanceM } from './geo'
 import type { TrackPoint } from './types'
@@ -68,6 +68,32 @@ describe('一天的路線切成好幾段', () => {
     expect(guessMode({ avgKmh: 25, maxKmh: 50 }, 'scooter')).toBe('scooter')
     expect(guessMode({ avgKmh: 25, maxKmh: 50 }, 'car')).toBe('car')
     expect(guessMode({ avgKmh: 120, maxKmh: 250 }, 'scooter')).toBe('none')
+  })
+})
+
+describe('手動切出一段（選起點和終點）', () => {
+  it('中間切出一段，頭尾兩段接得起來，標記是手動切的', () => {
+    const track = commuteDay('2026-11-20')
+    const [go] = computeLegs(track, dayStays(track))
+    const a = go.points[3].time
+    const b = go.points[6].time
+    const parts = applyCuts([go], [a, b])
+    expect(parts).toHaveLength(3)
+    expect(parts[1].start).toBe(a)
+    expect(parts[1].end).toBe(b)
+    expect(parts[1].id).toBe(`leg-${a}`)
+    expect(parts[0].id).toBe(go.id)
+    expect(parts[0].from).toBe(go.from)
+    expect(parts[2].to).toBe(go.to)
+    expect(parts[0].end).toBe(parts[1].start)
+    expect(parts[1].cutStart && parts[1].cutEnd).toBe(true)
+    expect(parts[0].cutStart).toBeFalsy()
+    expect(parts[0].km + parts[1].km + parts[2].km).toBeCloseTo(go.km, 0)
+  })
+  it('切點在頭尾或不在這段時間裡就不切', () => {
+    const track = commuteDay('2026-11-20')
+    const legs = computeLegs(track, dayStays(track))
+    expect(applyCuts(legs, [legs[0].start, legs[0].end, legs[1].start - 3600000])).toHaveLength(2)
   })
 })
 

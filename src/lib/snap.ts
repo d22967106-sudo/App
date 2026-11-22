@@ -394,6 +394,22 @@ export async function setLegMode(date: string, legId: string, mode: TravelMode |
   changed()
 }
 
+// ── 手動切段（key＝日期，值＝切點時間），存在手機上 ──
+
+export async function getLegCuts(): Promise<Record<string, number[]>> {
+  return (await getMeta<Record<string, number[]>>('route.legCuts')) ?? {}
+}
+
+/** add 加切點、remove 拿掉 2 分鐘內的切點 */
+export async function updateLegCuts(date: string, add: number[], remove: number[] = []): Promise<void> {
+  const all = await getLegCuts()
+  const next = [...new Set([...(all[date] ?? []), ...add])].filter((t) => !remove.some((r) => Math.abs(r - t) <= 120000)).sort((a, b) => a - b)
+  if (next.length) all[date] = next
+  else delete all[date]
+  await setMeta('route.legCuts', all)
+  changed()
+}
+
 // ── 手繪修改路線（2026-11-22 使用者要求：自己畫實際走的路，取代自動路線） ──
 
 type EditMap = Record<string, [number, number][]>
