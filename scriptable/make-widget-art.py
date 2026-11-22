@@ -5,7 +5,7 @@
   oldmap.png                         老地圖濾鏡（半透明泛黃、斑駁、紙紋、摺痕、四周變暗，蓋在地圖上；跟卡片一樣大）
   mapframe.png                       地圖卡片的撕邊框：撕邊外面是小工具背景紙的同一塊（所以看起來像撕過的地圖放在紙上），
                                      邊緣焦黃、捲角、影子；撕邊裡面透明（下面是地圖）。CARD_POS 要跟腳本的版面一致
-  tag.png                            地圖右下角的卷軸標籤（舊羊皮紙、兩端捲起、雙線墨框、影子；大小要跟腳本的 TAG 一樣）
+  tag.png                            地圖右下角的標籤：揉皺、撕邊、泛白的舊紙片（焦褐邊、斑點、影子；大小要跟腳本的 TAG 一樣）
   glyphs.json                        手寫中文字形（霞鶩文楷 TC，只收腳本裡 GLYPH_SET 那幾個固定出現的字）
                                      需要字體檔：python3 scriptable/make-widget-art.py <LXGWWenKaiTC-Regular.ttf>
                                      （https://github.com/lxgw/LxgwWenkaiTC ，OFL 授權，授權文字一起放在 public/widget/）
@@ -318,70 +318,101 @@ def mapframe():
     return Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
 
 
-# ── 卷軸標籤 ──
-TAG = (104, 28)
+def blur_np(a, sigma):
+    """浮點陣列的高斯模糊（Pillow 不支援浮點圖）"""
+    r = max(1, int(sigma * 3))
+    k = np.exp(-(np.arange(-r, r + 1) ** 2) / (2 * sigma * sigma))
+    k /= k.sum()
+    p = np.pad(a, r, mode='edge')
+    p = np.apply_along_axis(lambda v: np.convolve(v, k, 'valid'), 1, p)
+    return np.apply_along_axis(lambda v: np.convolve(v, k, 'valid'), 0, p)
 
 
-def scroll_tag():
-    W, H = TAG[0] * S, TAG[1] * S
-    rng = np.random.default_rng(31)
-    yy, xx = (np.mgrid[0:H, 0:W].astype(np.float32) + 0.5) / S
+# ── 右下角標籤：揉皺、撕邊的泛白舊紙片 ──
+TAG = (106, 30)
+
+
+def crumpled_tag():
+    """揉皺的舊紙片：用「高度圖＋光照」算出真實的皺褶明暗，撕邊有纖維毛邊，邊緣泛黃焦褐"""
+    S4 = 4  # 這張圖用 4 倍解析度畫，細節比較多
+    W, H = TAG[0] * S4, TAG[1] * S4
+    rng = np.random.default_rng(57)
+    yy, xx = (np.mgrid[0:H, 0:W].astype(np.float32) + 0.5) / S4
     w, h = TAG
-    roll_w = 6.5
-    # 中間的紙：上下邊微微波浪
-    top = 3.5 + np.sin(xx / 9) * 0.5
-    bot = h - 3.5 + np.sin(xx / 11 + 1) * 0.5
-    sheet = np.clip((yy - top) * S + 0.5, 0, 1) * np.clip((bot - yy) * S + 0.5, 0, 1) * np.clip((xx - roll_w + 1) * S, 0, 1) * np.clip((w - roll_w + 1 - xx) * S, 0, 1)
+
+    # 1) 皺褶高度圖：很多條折痕（V 形的峰或谷），長短、深淺、方向都不同，兩端漸淡
+    ht = np.zeros((H, W), np.float32)
+    for i in range(120):
+        big = i < 16
+        px, py = rng.uniform(-5, w + 5), rng.uniform(-3, h + 3)
+        ang = rng.uniform(0, np.pi)
+        nx, ny = np.cos(ang), np.sin(ang)
+        d = (xx - px) * nx + (yy - py) * ny
+        along = (xx - px) * -ny + (yy - py) * nx
+        L = rng.uniform(25, 70) if big else rng.uniform(6, 22)
+        amp = rng.uniform(0.6, 1.1) if big else rng.uniform(0.15, 0.45)
+        env = np.exp(-(along / L) ** 2)
+        width = rng.uniform(2.5, 5.5) if big else rng.uniform(0.8, 2.2)
+        v = np.clip(1 - np.abs(d) / width, 0, 1)  # V 形，中間尖
+        ht += (1 if rng.random() < 0.5 else -1) * amp * v * env
+    # 整張紙微微起伏
+    ht += fbm(H, W, [W // 2, W // 5], rng) * 1.2
+    ht = blur_np(ht, 0.14 * S4)
+
+    # 2) 光照（左上方、偏低的光，皺褶才有立體感）
+    gy, gx = np.gradient(ht * 1.0, 1 / S4)
+    nx_, ny_, nz_ = -gx, -gy, np.ones_like(gx) * 1.6
+    nl = np.sqrt(nx_ ** 2 + ny_ ** 2 + nz_ ** 2)
+    Ld = np.array([-0.55, -0.6, 0.58]); Ld = Ld / np.linalg.norm(Ld)
+    dif = (nx_ * Ld[0] + ny_ * Ld[1] + nz_ * Ld[2]) / nl
+    shade = 0.58 + 0.5 * dif
+
+    # 3) 紙色：泛白偏米，帶一點不均勻與細纖維紋
     g = rng.normal(0, 1, (H, W)).astype(np.float32)
-    g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.6)), np.float32) / 128 - 1
-    m = fbm(H, W, [W // 3, W // 8, 10], rng, 0.6)
-    base = np.array([222, 200, 156], np.float32)
-    sheet_rgb = base * (1 + m[..., None] * 0.1 + g[..., None] * 0.05)
-    # 紙的邊緣焦黃
-    ed = np.minimum(np.minimum(yy - top, bot - yy), 99)
-    burn = np.clip(1 - ed / 4.5, 0, 1) ** 1.5 * (0.7 + 0.3 * (m + 1) / 2)
-    sheet_rgb = sheet_rgb * (1 - burn[..., None] * 0.45) + np.array([120, 74, 30], np.float32) * burn[..., None] * 0.45
-    # 雙線墨框
-    ink = np.array([58, 32, 14], np.float32)
-    def rule(inset, width, alpha):
-        x0, x1, y0, y1 = roll_w + inset, w - roll_w - inset, 3.5 + inset, h - 3.5 - inset
-        d = np.minimum.reduce([np.abs(xx - x0) + np.where((yy < y0) | (yy > y1), 99, 0), np.abs(xx - x1) + np.where((yy < y0) | (yy > y1), 99, 0),
-                               np.abs(yy - y0) + np.where((xx < x0) | (xx > x1), 99, 0), np.abs(yy - y1) + np.where((xx < x0) | (xx > x1), 99, 0)])
-        return np.clip((width / 2 - d) * S + 0.5, 0, 1) * alpha
-    r1 = rule(1.4, 0.8, 0.75)
-    r2 = rule(2.6, 0.4, 0.6)
-    for r in (r1, r2):
-        sheet_rgb = sheet_rgb * (1 - r[..., None]) + ink * r[..., None]
-    # 兩端捲起來的紙卷（圓柱光影）
-    def roll(cx):
-        u = np.clip((xx - cx) / (roll_w / 2), -1, 1)
-        cov = np.clip((roll_w / 2 - np.abs(xx - cx)) * S + 0.5, 0, 1) * np.clip((yy - 1.5) * S + 0.5, 0, 1) * np.clip((h - 1.5 - yy) * S + 0.5, 0, 1)
-        nz = np.sqrt(np.clip(1 - u ** 2, 0, 1))
-        light = np.clip(-0.5 * u + 0.8 * nz, 0, 1)
-        col = np.array([200, 172, 124], np.float32)[None, None, :] * (0.55 + 0.6 * light[..., None]) * (1 + g[..., None] * 0.04)
-        # 卷口（上下端的橢圓，看得到捲起來的螺旋）
-        for ey in (1.5, h - 1.5):
-            e = ((xx - cx) / (roll_w / 2)) ** 2 + ((yy - ey) / 1.6) ** 2
-            ring = np.exp(-((np.sqrt(e) - 0.55) / 0.12) ** 2) * (e < 1.2)
-            col = col * (1 - ring[..., None] * 0.5)
-        # 紙卷兩側的焦黃
-        col = col * (1 - (np.abs(u) ** 6)[..., None] * 0.35)
-        return cov, col
-    rgb = sheet_rgb * sheet[..., None]
-    a = sheet.copy()
-    # 紙卷投在紙上的影子
-    for cx, sgn in ((roll_w / 2 + 0.5, 1), (w - roll_w / 2 - 0.5, -1)):
-        shade = np.clip(1 - np.abs(xx - (cx + sgn * roll_w / 2 + sgn * 1.2)) / 2.2, 0, 1) * sheet * 0.35
-        rgb = rgb * (1 - shade[..., None])
-        cov, col = roll(cx)
-        rgb = rgb * (1 - cov[..., None]) + col * cov[..., None]
-        a = np.maximum(a, cov)
-    # 整個標籤的影子
-    sil = Image.fromarray((a * 255).astype(np.uint8))
-    sh = np.asarray(sil.transform((W, H), Image.AFFINE, (1, 0, -1 * S, 0, 1, -1.8 * S)).filter(ImageFilter.GaussianBlur(1.6 * S)), np.float32) / 255 * 0.45
-    out_a = a + sh * (1 - a)
-    out_rgb = (rgb * a[..., None] + np.array([30, 18, 8], np.float32) * (sh * (1 - a))[..., None]) / np.maximum(out_a, 1e-6)[..., None]
-    return Image.fromarray(np.dstack([np.clip(out_rgb, 0, 255), np.clip(out_a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+    g = np.asarray(Image.fromarray(((g * 40) + 128).clip(0, 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.5 * S4 / 3)), np.float32) / 128 - 1
+    mm = fbm(H, W, [W // 3, W // 8, W // 20], rng, 0.6)
+    base = np.array([242, 228, 198], np.float32) * (1 + mm[..., None] * 0.035 + g[..., None] * 0.02)
+    col = base * shade[..., None]
+
+    # 4) 撕邊：大塊不規則＋細鋸齒，外面一圈半透明的紙纖維毛邊
+    inset = 2.6
+    edge_noise = fbm(H, W, [W // 6, W // 18, 10, 4], rng, 0.7)
+    dx = np.minimum(xx, w - xx)
+    dy = np.minimum(yy, h - yy)
+    dist = np.minimum(dx, dy) - inset + edge_noise * 2.3  # >0 在紙裡
+    body = np.clip(dist * S4 + 0.5, 0, 1)
+    fiber_n = rng.random((H, W)).astype(np.float32)
+    fiber_n = np.asarray(Image.fromarray((fiber_n * 255).astype(np.uint8)).filter(ImageFilter.GaussianBlur(0.4)), np.float32) / 255
+    fringe = np.clip((dist + 0.9) / 0.9, 0, 1) * (1 - body) * (fiber_n > 0.5) * 0.85
+    alpha = np.clip(body + fringe, 0, 1)
+    # 撕開的白色紙邊（緊貼邊緣、偏亮）
+    torn = np.exp(-((dist - 0.25) / 0.35) ** 2) * body
+    col = col * (1 - torn[..., None] * 0.35) + np.array([248, 242, 228], np.float32) * torn[..., None] * 0.35
+    col = col * (1 - fringe[..., None]) + np.array([240, 232, 214], np.float32) * fringe[..., None]
+
+    # 5) 泛黃與焦褐：越靠邊越黃，邊上幾塊焦斑（像參考圖右上角）
+    age = np.clip(1 - dist / 5.5, 0, 1) ** 1.6
+    patch = np.clip(0.3 + fbm(H, W, [W // 4, W // 10, 8], rng) * 1.4, 0, 1)
+    col = col * (1 - (age * 0.25)[..., None]) + np.array([196, 160, 104], np.float32) * (age * 0.25)[..., None]
+    scorch = np.clip(1 - dist / 2.2, 0, 1) ** 1.3 * patch
+    col = col * (1 - (scorch * 0.6)[..., None]) + np.array([138, 86, 36], np.float32) * (scorch * 0.6)[..., None]
+    # 零星的小黃斑
+    sp = Image.new('L', (W, H), 0)
+    sd = ImageDraw.Draw(sp)
+    for _ in range(12):
+        x, y = rng.uniform(0, W), rng.uniform(0, H)
+        r = rng.uniform(0.2, 0.8) * S4
+        sd.ellipse((x - r, y - r * 0.8, x + r, y + r * 0.8), fill=int(rng.uniform(70, 160)))
+    sp = np.asarray(sp.filter(ImageFilter.GaussianBlur(0.45 * S4)), np.float32) / 255
+    col = col * (1 - sp[..., None] * 0.35) + np.array([160, 112, 56], np.float32) * sp[..., None] * 0.35
+
+    # 6) 影子（紙片浮在地圖上一點點）
+    sil = Image.fromarray((alpha * 255).astype(np.uint8))
+    sh = np.asarray(sil.transform((W, H), Image.AFFINE, (1, 0, -0.9 * S4, 0, 1, -1.6 * S4)).filter(ImageFilter.GaussianBlur(1.3 * S4)), np.float32) / 255 * 0.5
+    out_a = alpha + sh * (1 - alpha)
+    rgb = (col * alpha[..., None] + np.array([28, 16, 6], np.float32) * (sh * (1 - alpha))[..., None]) / np.maximum(out_a, 1e-6)[..., None]
+    img = Image.fromarray(np.dstack([np.clip(rgb, 0, 255), np.clip(out_a, 0, 1) * 255]).astype(np.uint8), 'RGBA')
+    return img.resize((TAG[0] * S, TAG[1] * S), Image.LANCZOS)
 
 
 # ── 手寫中文字形 ──
@@ -484,7 +515,7 @@ if __name__ == '__main__':
     glass().save(out / 'glass.png', optimize=True)
     oldmap().save(out / 'oldmap.png', optimize=True)
     mapframe().save(out / 'mapframe.png', optimize=True)
-    scroll_tag().save(out / 'tag.png', optimize=True)
+    crumpled_tag().save(out / 'tag.png', optimize=True)
     import sys, json
     if len(sys.argv) > 1:
         g = glyphs(sys.argv[1], glyph_set())

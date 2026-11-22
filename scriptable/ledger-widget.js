@@ -1,4 +1,4 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.10
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.11
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
 //   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
@@ -27,7 +27,7 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 8
+const ART_VER = 9
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
@@ -815,7 +815,7 @@ function blurryRoute(dc, pts) {
 }
 
 /** 右下角的地名小紙片：撕邊的舊紙＋淡淡的影子（畫在卡片底圖上） */
-const TAG = { w: 104, h: 28, right: 6, bottom: 8 } // 卷軸標籤 tag.png 的大小要跟 make-widget-art.py 一樣
+const TAG = { w: 106, h: 30, right: 5, bottom: 7 } // 卷軸標籤 tag.png 的大小要跟 make-widget-art.py 一樣
 function drawTag(dc) {
   const { w, h } = CARD
   const x0 = w - TAG.right - TAG.w
@@ -1005,12 +1005,12 @@ async function rightCard(row, d) {
   // 紙片上的字（紙片本身畫在底圖上）
   const capRow = card.addStack()
   capRow.addSpacer()
-  // 一行置中寫在兩端紙卷之間：「今天走了 1.1 km」「今天在這裡」「今天還沒有足跡」
+  // 一行置中寫在皺紙片上：「今天走了 1.1 km」「今天在這裡」「今天還沒有足跡」
   const cap = capRow.addStack()
   cap.layoutHorizontally()
   cap.centerAlignContent()
   cap.size = new Size(TAG.w, TAG.h)
-  cap.setPadding(1, 12, 0, 12)
+  cap.setPadding(1, 8, 0, 8)
   cap.addSpacer()
   await cnText(cap, top + main, 10.5, C.text)
   cap.addSpacer()
