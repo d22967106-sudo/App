@@ -18,12 +18,11 @@
 
 ## 目前狀態
 
-**2026-11-22 小工具美化（工作分支 `claude/nice-pasteur-6gt4nv`，腳本版本 2026-11-22.2，還沒合併到預設分支）：** 使用者要「有美術設計、奶茶色系、偏文青風，**不要奶茶（珍珠杯）裝飾**」。改了 `scriptable/ledger-widget.js`：
-- 背景整張用 DrawContext 畫（`backgroundArt`）：米色紙張漸層＋淡淡的紙纖維顆粒＋內縮 7 點的細線圓角框（像明信片／筆記本）。中型、小型、錯誤畫面、一年前（沒照片時）都用。
-- 字：數字與英文用 iPhone 內建的襯線字 `Baskerville-SemiBold／Italic／Regular`（`serif()`），中文用系統細體。左上英文斜體日期「Nov. 22 · Sun」→「今日支出」→ 金額 32 → 小字「今天記了 N 筆／今天還沒有記帳」→ 細分隔線（有預算時換成細線進度＋小圓點）→「本月 $X」（有預算右邊「剩／超出」）→ 細線 SF Symbols：步數、最後定位時間、離線。
-- 右邊：**拍立得**（白框、淡陰影、上面一段斜的半透明紙膠帶），照片區＝路線地圖／目前位置地圖（z16＋圓點）／沒有點時的線條小插畫（太陽與山）；下面白邊寫「today at／地名」「today／走了 X km」「today／還沒有足跡」。© OpenStreetMap 在照片右下。
-- 第一版（2026-11-22.1，膠囊標籤＋漸層）沒發布就被這版取代；中間試過珍珠奶茶杯吉祥物，使用者說不要。
-- 開發環境用 Playwright＋假的 Scriptable API（scratchpad，沒放進 repo）＋假圖磚看過 5 種情況；Baskerville、SF Symbols、真的 OSM 圖磚要在 iPhone 上確認。
+**2026-11-22 小工具美化（工作分支 `claude/nice-pasteur-6gt4nv`，腳本版本 2026-11-22.3，還沒合併到預設分支）：** 使用者一路調整：要美術設計 → 奶茶色系、文青風、**不要奶茶（珍珠杯）裝飾** → **復古紙張**（不要髒污效果、要逼真；最後給參考圖：米灰舊紙、細顆粒、四周焦褐燒邊）→ 地圖那側要**放大鏡看舊地圖**的效果（給參考圖：模糊的地圖上一支銅框放大鏡，鏡片裡清楚）。目前做法：
+- **紙張背景是圖片**：`scriptable/make-paper.py`（numpy＋Pillow，程式生成，不用網路素材）產生 `public/widget/paper-medium.jpg`（338×158 點的 3 倍）、`paper-small.jpg`（158×158），跟 App 一起發布到 GitHub Pages（.jpg 不在 Service Worker 預先快取清單裡）。腳本 `loadPaper` 從 `APP_URL + widget/paper-*.jpg` 下載一次，存在 Scriptable 的 documentsDirectory（檔名含 `PAPER_VER`，換圖時加 1）；下載不到用 DrawContext 畫的米灰底＋暗角。**要先發布 App，小工具才下載得到紙**。
+- 字：深咖啡色（配深色舊紙），數字與英文 Baskerville、中文系統細體；英文斜體日期、細線進度。
+- 右邊地圖卡片（140×132，`rightCard`）：底圖＝**模糊的舊地圖**（DrawContext 不能模糊，改用「低 3 層的 OSM 圖磚放大 8 倍」，iOS 縮放內插自然變糊；範圍是鏡片的 4 倍）＋舊紙色調＋鏡片影子＋往左下的銅環木柄（畫在底圖上）；**放大鏡**＝圓角＝半徑的 stack（銅色漸層框，padding 5）裡面再一個圓形 stack，背景是清楚的地圖（z16 目前位置／路線自動縮放）＋邊緣暗角＋左上反光。右下角米色小標籤「today at／地名」「today／走了 X km」「today／還沒有足跡」。拍立得拿掉了。
+- 開發環境用 Playwright＋假的 Scriptable API（scratchpad）＋假圖磚看過；真的 OSM 圖磚模糊效果、Baskerville、Scriptable 圓形 stack 與漸層 startPoint 的實際樣子要在 iPhone 上確認。之前做過的版本（漸層膠囊、珍珠杯、文青米白＋拍立得、牛皮紙、金黃斑駁紙）都被使用者換掉，不要再提。
 - **要經使用者同意合併到預設分支發布，使用者再到設定頁重新複製腳本貼到 Scriptable（腳本名稱、捷徑名稱沒動）。**
 
 **2026-11-21～22 路線與耗電調整（工作分支 `claude/affectionate-maxwell-xwwddl`，每次都經使用者同意推到預設分支發布；最後版本 11/22 01:08）。使用者說「先這樣」暫停。細節見下方「路線改善」底下 2026-11-21 起的條目。待使用者實測：**
