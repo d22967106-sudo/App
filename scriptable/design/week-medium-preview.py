@@ -209,12 +209,18 @@ def digit_mask(ch, size, sw):
     return m.resize((size * 2, size * 2), Image.LANCZOS)
 
 
-def chalk_text(im, x, cy, text, col, size, num=False):
+def chalk_text(im, x, cy, text, col, size, num=False, center=False):
     """照 chalk.py：字加描邊、92% 不透明，再隨機挖小洞；cy＝這行字墨跡的垂直中心；數字字距拉開"""
     size = int(size)
     font = ImageFont.truetype(NUMFONT if num else FONT, size)
     track = size * 0.12 if num else size * 0.04
     top, bot, w = ink(font, text, track)
+    if center:
+        # x 是要對齊的中心：用實際墨跡的左右範圍置中（字型的字框不準）
+        mk = Image.new('L', (size * 3, size * 3), 0)
+        ImageDraw.Draw(mk).text((size, size), text, font=font, fill=255)
+        l, _, r, _ = mk.getbbox()
+        x = x - ((l + r) / 2 - size)
     y = cy - (top + bot) / 2
     lay = Image.new('RGBA', im.size, (0, 0, 0, 0))
     dl = ImageDraw.Draw(lay)
@@ -279,9 +285,9 @@ def widget(days, out):
             for b in range(bh):
                 if random.random() > 0.015:
                     px(d, x + a, 36 - b, jit(YELLOW if v >= avg else BLUE))
-        texts.append(((x - 0.8) * s, 40.6 * s, '一二三四五六日'[i], TEXT, 6.2 * s, False))
+        texts.append(((x + 2) * s, 40.6 * s, '一二三四五六七'[i], TEXT, 6.2 * s, 'center'))
     for x, cy, t, c, size, num in texts:
-        chalk_text(im, x, cy, t, c, size, num)
+        chalk_text(im, x, cy, t, c, size, num is True, center=(num == 'center'))
     im.save(out)
 
 
