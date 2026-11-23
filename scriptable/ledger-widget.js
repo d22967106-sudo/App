@@ -1,9 +1,9 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-23.1
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-23.2
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
-//   預設是「昨日回顧」：昨天的支出、本月預算進度、昨天的步數、昨天的路線（昨天的事不會再變，一天只更新幾次）
-//   中型小工具：支出、本月預算進度、步數、路線；小型小工具：支出與本月預算；鎖定畫面（長方形）：支出與本月預算
-//   「參數」填「今天」→ 改看今天（即時，但 iOS 不一定常常更新）；填「一年前」→ 顯示一年前的今天
+//   中型小工具（預設）：黑板粉筆風「七日回顧」——8 天前～2 天前的七日支出、日均、每天柱狀圖（資料都已定案，一天只更新一次）
+//   小型小工具、鎖定畫面（長方形）：「昨日回顧」——昨天的支出與本月預算
+//   「參數」填「昨天」→ 中型也看昨日回顧；填「今天」→ 看今天（即時，但 iOS 不一定常常更新）；填「一年前」→ 顯示一年前的今天
 // 金鑰等同密碼，不要把這份腳本分享給別人。
 
 const BASE = '__BASE__'
@@ -51,6 +51,8 @@ const dayLabel = (d = new Date()) => `${WEEK_FULL[d.getDay()]}, ${MONTH_EN[d.get
 
 // ── 看哪一天：預設昨天（昨日回顧，2026-11-23 使用者要求：不需要一直更新的小工具） ──
 const PARAM = String(args.widgetParameter || '').trim()
+/** 中型、沒填參數＝黑板七日回顧 */
+const WEEK_MODE = (config.widgetFamily || 'medium') === 'medium' && !PARAM
 const SHOW_TODAY = /今天|今日|today/i.test(PARAM) || /一年前|year/i.test(PARAM)
 const SHOW_DATE = (() => {
   const d = new Date()
@@ -337,9 +339,9 @@ const hm = (t) => {
 
 async function load() {
   const fm = FileManager.local()
-  const cache = fm.joinPath(fm.cacheDirectory(), `ledger-widget-${SHOW_TODAY ? 'today' : 'yesterday'}.json`)
+  const cache = fm.joinPath(fm.cacheDirectory(), `ledger-widget-${WEEK_MODE ? 'week' : SHOW_TODAY ? 'today' : 'yesterday'}.json`)
   try {
-    const req = new Request(`${BASE}/widget?date=${dateKey(SHOW_DATE)}`)
+    const req = new Request(WEEK_MODE ? `${BASE}/widget?date=${dateKey(new Date())}&week=1` : `${BASE}/widget?date=${dateKey(SHOW_DATE)}`)
     req.headers = { Authorization: `Bearer ${KEY}` }
     req.timeoutInterval = 15
     const data = await req.loadJSON()
@@ -1123,6 +1125,206 @@ function accessoryWidget(d) {
   return w
 }
 
+// ── 黑板粉筆風「七日回顧」（中型）──
+// 畫法照使用者之前的黑板按鈕小工具（scriptable/design/ref-chalk.py）與設計預覽（scriptable/design/week-medium-preview.py）：
+// 112×52 格、一格 3 點；黑板＋木框、粉筆框線（實線隨機斷）、粉筆字＝辰宇落雁體（字形檔 chalk-glyphs.json）
+const CHALK_GLYPH_SET = '七日支出均每天一二三四五六$0123456789,'
+const CHALK_VER = 1
+const CK = {
+  board: [38, 66, 52], board2: [46, 78, 62], board3: [60, 92, 76],
+  frame0: [80, 50, 28], wood: [120, 78, 45], wood2: [100, 62, 35],
+  text: [240, 240, 232], yellow: [250, 232, 140], blue: [150, 200, 245], white: [238, 238, 228],
+  coinO: [200, 165, 75], coinW: [255, 246, 200],
+}
+let CHALK_G = undefined
+async function loadChalkGlyphs() {
+  if (CHALK_G !== undefined) return CHALK_G
+  CHALK_G = null
+  const fm = FileManager.local()
+  const file = fm.joinPath(fm.documentsDirectory(), `ledger-chalk-v${CHALK_VER}-glyphs.json`)
+  try {
+    if (fm.fileExists(file)) CHALK_G = JSON.parse(fm.readString(file))
+    else {
+      const req = new Request(`${APP_URL}widget/chalk-glyphs.json?v=${CHALK_VER}`)
+      req.timeoutInterval = 10
+      const txt = await req.loadString()
+      if (req.response.statusCode !== 200) throw new Error(String(req.response.statusCode))
+      CHALK_G = JSON.parse(txt)
+      fm.writeString(file, txt)
+    }
+  } catch {
+    CHALK_G = null
+  }
+  return CHALK_G
+}
+
+/** 固定亂數（每次畫出來一樣） */
+function seededRandom(seed) {
+  let s = seed % 2147483647
+  return () => (s = (s * 16807) % 2147483647) / 2147483647
+}
+const rgb = (c, a = 1) => new Color('#' + c.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join(''), a)
+
+/** 字形的折線（字形單位，y 往上）與墨跡範圍 */
+function chalkGlyph(G, ch) {
+  const g = G.g[ch]
+  const contours = []
+  let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9
+  if (g && g[1]) {
+    const tok = g[1].match(/M|-?\d+/g)
+    let x = 0, y = 0, cur = null
+    for (let i = 0; i < tok.length; ) {
+      if (tok[i] === 'M') {
+        cur = []
+        contours.push(cur)
+        i++
+        continue
+      }
+      x += +tok[i]
+      y += +tok[i + 1]
+      i += 2
+      cur.push([x, y])
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y)
+    }
+  }
+  return { adv: g ? g[0] : G.em / 2, contours, minX, maxX, minY, maxY }
+}
+
+/** 一行粉筆字的寬度（點） */
+function chalkWidth(G, text, size, num) {
+  const k = size / G.em
+  const track = size * (num ? 0.12 : 0.04)
+  return [...text].reduce((w, ch, i, a) => w + chalkGlyph(G, ch).adv * k + (i < a.length - 1 ? track : 0), 0)
+}
+
+/** 畫一行粉筆字：x＝左邊（center 時＝中心），cy＝墨跡的垂直中心；描邊、92% 不透明、隨機小洞 */
+function chalkText(dc, rnd, G, text, x, cy, size, color, { num = false, center = false } = {}) {
+  const chars = [...text]
+  const k = size / G.em
+  const track = size * (num ? 0.12 : 0.04)
+  const gs = chars.map((ch) => chalkGlyph(G, ch))
+  const top = Math.max(...gs.map((g) => g.maxY))
+  const bot = Math.min(...gs.map((g) => g.minY))
+  const base = cy + ((top + bot) / 2) * k
+  if (center) x -= ((gs[0].minX + gs[0].maxX) / 2) * k
+  const col = rgb(color, 0.92)
+  dc.setFillColor(col)
+  dc.setStrokeColor(col)
+  dc.setLineWidth((size / 42) * 2) // 跟預覽一樣粗（預覽的描邊只往外加，這裡是置中）
+  let pen = x
+  for (const g of gs) {
+    if (g.contours.length) {
+      const path = new Path()
+      for (const c of g.contours) {
+        path.addLines(c.map(([px, py]) => new Point(pen + px * k, base - py * k)))
+        path.closeSubpath()
+      }
+      dc.addPath(path)
+      dc.fillPath()
+      dc.addPath(path)
+      dc.strokePath()
+    }
+    pen += g.adv * k + track
+  }
+  // 粉筆小洞（黑板色的小點）
+  const w = pen - track - x
+  const n = Math.round((w * size * 9) / (num ? 420 : 95))
+  dc.setFillColor(rgb(CK.board))
+  for (let i = 0; i < n; i++) {
+    dc.fillRect(new Rect(x - 0.7 + rnd() * (w + 0.7), base - top * k + rnd() * (top - bot) * k, 0.67, 0.67))
+  }
+}
+
+async function chalkWeekWidget(week) {
+  const G0 = 112, GH = 52, U = 3
+  const W = G0 * U, H = GH * U
+  const dc = canvas(W, H)
+  const rnd = seededRandom(11)
+  const jit = (c) => { const v = Math.floor(rnd() * 21) - 12; return c.map((x) => x + v) }
+  const cell = (x, y, c) => { dc.setFillColor(rgb(c)); dc.fillRect(new Rect(x * U, y * U, U, U)) }
+  // 黑板＋木框（圓角）
+  const R = 6, FR = 3
+  for (let y = 0; y < GH; y++) {
+    for (let x = 0; x < G0; x++) {
+      const cx = x + 0.5, cy = y + 0.5
+      let e = Math.min(cx, cy, G0 - cx, GH - cy)
+      if ((cx < R || cx > G0 - R) && (cy < R || cy > GH - R)) {
+        const ccx = cx < R ? R : G0 - R, ccy = cy < R ? R : GH - R
+        e = R - Math.hypot(cx - ccx, cy - ccy)
+      }
+      if (e < 0) continue
+      let c
+      if (e < 1) c = CK.frame0
+      else if (e < FR + 0.3) c = (x + y * 3) % 9 ? CK.wood : CK.wood2
+      else {
+        const r = rnd()
+        c = r < 0.08 ? CK.board2 : r < 0.1 ? CK.board3 : CK.board
+      }
+      cell(x, y, c)
+    }
+  }
+  // 粉筆框線（實線，隨機斷 15%）
+  const chalkRect = (x0, y0, w, h, c) => {
+    for (let x = x0 + 1; x < x0 + w - 1; x++) for (const y of [y0, y0 + h - 1]) if (rnd() > 0.15) cell(x, y, jit(c))
+    for (let y = y0 + 1; y < y0 + h - 1; y++) for (const x of [x0, x0 + w - 1]) if (rnd() > 0.15) cell(x, y, jit(c))
+  }
+  const COIN = ['..YYYYY..', '.YOWWWOY.', 'YOW.O.WOY', 'YO.OOO.OY', 'YO..O..OY', 'YO.OOO.OY', 'YOW.O.WOY', '.YOWWWOY.', '..YYYYY..']
+  const pal = { Y: CK.yellow, O: CK.coinO, W: CK.coinW }
+  const G = await loadChalkGlyphs()
+  const days = (week && week.days) || []
+  const total = (week && week.total) || 0
+  const avg = (week && week.avg) || 0
+  const money = (n) => '$' + Math.round(n).toLocaleString('en-US')
+  // 左上：七日支出
+  chalkRect(5, 5, 53, 26, CK.yellow)
+  COIN.forEach((row, j) => [...row].forEach((ch, i) => ch !== '.' && rnd() > 0.05 && cell(8 + i, 8 + j, jit(pal[ch]))))
+  // 左下：日均
+  chalkRect(5, 33, 53, 14, CK.blue)
+  // 右：每天柱狀圖（固定星期一到星期日）
+  chalkRect(60, 5, 47, 42, CK.white)
+  const byWd = {}
+  for (const d of days) byWd[d.weekday] = d.expense
+  const vals = [1, 2, 3, 4, 5, 6, 7].map((wd) => byWd[wd] || 0)
+  const top = Math.max(...vals, 1)
+  vals.forEach((v, i) => {
+    const bh = Math.max(1, Math.round((v / top) * 19))
+    const x = 64 + i * 6
+    for (let a = 0; a < 4; a++) for (let b = 0; b < bh; b++) if (rnd() > 0.015) cell(x + a, 36 - b, jit(v >= avg && v > 0 ? CK.yellow : CK.blue))
+  })
+  // 字
+  const fit = (text, size, maxw) => {
+    while (size > 7 && chalkWidth(G, text, size, true) > maxw) size -= 0.5
+    return size
+  }
+  if (G && [...('七日支出日均每天一二三四五六七' + money(total) + money(avg))].every((ch) => G.g[ch])) {
+    chalkText(dc, rnd, G, '七日支出', 19.5 * U, 13 * U, 8.6 * U, CK.text)
+    chalkText(dc, rnd, G, money(total), 8.5 * U, 24.8 * U, fit(money(total), 11 * U, 46 * U), CK.yellow, { num: true })
+    chalkText(dc, rnd, G, '日均', 8 * U, 40.3 * U, 8.4 * U, CK.text)
+    chalkText(dc, rnd, G, money(avg), 24 * U, 40.3 * U, fit(money(avg), 9.6 * U, 31 * U), CK.text, { num: true })
+    chalkText(dc, rnd, G, '每天', 63 * U, 10.2 * U, 8 * U, CK.text)
+    '一二三四五六七'.split('').forEach((ch, i) => chalkText(dc, rnd, G, ch, (64 + i * 6 + 2) * U, 40.6 * U, 6.2 * U, CK.text, { center: true }))
+  } else {
+    // 字形檔下載不到：用系統字
+    const sys = (t, x, y, w, size, c, align = 'left') => {
+      dc.setFont(Font.boldSystemFont(size))
+      dc.setTextColor(rgb(c))
+      if (align === 'center') dc.setTextAlignedCenter()
+      else dc.setTextAlignedLeft()
+      dc.drawTextInRect(t, new Rect(x, y, w, size * 1.4))
+    }
+    sys('七日支出', 19 * U, 9 * U, 36 * U, 13, CK.text)
+    sys(money(total), 8 * U, 19 * U, 48 * U, 20, CK.yellow)
+    sys('日均 ' + money(avg), 8 * U, 36.5 * U, 48 * U, 15, CK.text)
+    sys('每天', 63 * U, 7 * U, 20 * U, 12, CK.text)
+    '一二三四五六七'.split('').forEach((ch, i) => sys(ch, (64 + i * 6 - 1) * U, 38.5 * U, 6 * U, 10, CK.text, 'center'))
+  }
+  const w = new ListWidget()
+  w.backgroundColor = rgb(CK.frame0)
+  w.backgroundImage = dc.getImage()
+  w.setPadding(0, 0, 0, 0)
+  return w
+}
+
 // 點小工具 → Scriptable 用 ?open=1 執行這個腳本 → 交給捷徑「打開摳摳手帳」
 // → 捷徑用 webapp://網址 打開主畫面上的 App（不是 Safari）。
 // 小工具直接設 webapp:// 或 shortcuts:// 網址，實測都只會停在 Scriptable 的腳本列表。
@@ -1142,6 +1344,13 @@ if (openApp) {
 function nextRefresh() {
   const now = new Date()
   if (SHOW_TODAY) return new Date(now.getTime() + 15 * 60 * 1000)
+  if (WEEK_MODE) {
+    // 七日回顧：資料都已定案，只在換日後（00:10）更新
+    const t = new Date(now)
+    t.setDate(t.getDate() + 1)
+    t.setHours(0, 10, 0, 0)
+    return t
+  }
   for (const [h, m] of [[0, 10], [9, 0], [13, 0], [19, 0], [24, 10]]) {
     const t = new Date(now)
     t.setHours(h, m, 0, 0)
@@ -1155,6 +1364,7 @@ const param = PARAM
 const res = await load()
 let widget
 if (res.error) widget = await errorWidget(res.error)
+else if (WEEK_MODE) widget = await chalkWeekWidget(res.data.week)
 else if (/一年前|year/i.test(param)) widget = await yearAgoWidget(res.data)
 else if (family.startsWith('accessory')) widget = accessoryWidget(res.data)
 else if (family === 'small') widget = await smallWidget(res.data, res.stale)

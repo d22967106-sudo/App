@@ -508,7 +508,27 @@ def glyph_set():
     return re.search(r"const GLYPH_SET = '([^']*)'", js).group(1)
 
 
+def chalk_glyph_set():
+    """讀腳本裡的 CHALK_GLYPH_SET（黑板七日回顧用的粉筆字）"""
+    import re
+    js = (Path(__file__).resolve().parent / 'ledger-widget.js').read_text(encoding='utf-8')
+    return re.search(r"const CHALK_GLYPH_SET = '([^']*)'", js).group(1)
+
+
+def make_chalk_glyphs():
+    """只重新產生 chalk-glyphs.json（辰宇落雁體子集在 scriptable/design/）：python3 scriptable/make-widget-art.py --chalk"""
+    import json
+    here = Path(__file__).resolve().parent
+    g = glyphs(str(here / 'design' / 'ChenYuluoyan-Thin-subset.ttf'), chalk_glyph_set())
+    (here.parent / 'public' / 'widget' / 'chalk-glyphs.json').write_text(json.dumps(g, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+    print('chalk glyphs', len(g['g']))
+
+
 if __name__ == '__main__':
+    import sys
+    if sys.argv[1:] == ['--chalk']:
+        make_chalk_glyphs()
+        raise SystemExit
     out = Path(__file__).resolve().parent.parent / 'public' / 'widget'
     out.mkdir(parents=True, exist_ok=True)
     # 中型 338×158、小型 158×158（點），3 倍解析度

@@ -191,6 +191,21 @@ describe('接收端', () => {
     expect(w.yearAgo).toMatchObject({ date: '2025-11-18', summary: '很累但很開心', count: 1, photoId: 'p1', notes: [{ note: '去阿里山' }] })
   })
 
+  it('七日回顧：8 天前～2 天前每天的支出、星期幾、合計、日均', async () => {
+    sb.tables.entries.set('w1', { id: 'w1', kind: 'expense', date: '2026-11-15', time: 1, amountTwd: 820, title: '', note: '', location: null, photoIds: [] })
+    sb.tables.entries.set('w2', { id: 'w2', kind: 'expense', date: '2026-11-21', time: 1, amountTwd: 390, title: '', note: '', location: null, photoIds: [] })
+    sb.tables.entries.set('w3', { id: 'w3', kind: 'income', date: '2026-11-17', time: 1, amountTwd: 5000, title: '', note: '', location: null, photoIds: [] })
+    sb.tables.entries.set('w4', { id: 'w4', kind: 'expense', date: '2026-11-22', time: 1, amountTwd: 999, title: '', note: '', location: null, photoIds: [] })
+    const r = await (await call('/auto/widget?date=2026-11-23&week=1', { method: 'GET' })).json()
+    expect(r.week.start).toBe('2026-11-15')
+    expect(r.week.end).toBe('2026-11-21')
+    expect(r.week.days).toHaveLength(7)
+    expect(r.week.days[0]).toEqual({ date: '2026-11-15', weekday: 7, expense: 820 }) // 11/15 是星期日
+    expect(r.week.days[1].weekday).toBe(1)
+    expect(r.week.total).toBe(1210) // 收入和昨天（11/22）不算
+    expect(r.week.avg).toBe(173)
+  })
+
   it('小工具：今天還沒有定位點時，用前幾天最後的位置（顯示「今天在 ○○」）', async () => {
     sb.tables.track_points.set('y1', { id: 'y1', date: '2026-11-21', time: 100, lat: 25.04, lng: 121.45, accuracy: 10, source: 'auto' })
     sb.tables.track_points.set('y2', { id: 'y2', date: '2026-11-21', time: 200, lat: 25.05312, lng: 121.4511, accuracy: 16, source: 'auto' })

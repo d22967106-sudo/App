@@ -317,6 +317,21 @@ export function carryFrom(before) {
     .at(-1) || null
 }
 
+/**
+ * 七日回顧（黑板中型小工具）：start～end 這 7 天每天的支出、星期幾（1＝星期一…7＝星期日）、合計、日均。
+ * 小工具看「8 天前～2 天前」：這些日子的資料都已經定案，一天更新一次就夠。
+ */
+export function buildWeek({ start, end, entries }) {
+  const days = []
+  for (let d = start; d <= end; d = shiftDay(d, 1)) {
+    const [y, m, dd] = d.split('-').map(Number)
+    const wd = new Date(Date.UTC(y, m - 1, dd)).getUTCDay()
+    days.push({ date: d, weekday: wd === 0 ? 7 : wd, expense: sum(entries.filter((e) => e.date === d && e.kind === 'expense')) })
+  }
+  const total = Math.round(days.reduce((n, x) => n + x.expense, 0))
+  return { start, end, days, total, avg: Math.round(total / days.length) }
+}
+
 export function buildWidget({ date, entries, track, steps, yearAgo, carry = null }) {
   const today = entries.filter((e) => e.date === date)
   // 今天還沒有任何點：用前幾天最後的位置當目前位置（小工具顯示「今天在 ○○」，不是「今天還沒有軌跡」）
@@ -453,6 +468,12 @@ export async function handleAuto(request, env, url) {
       const info = await keyInfo(env, key)
       let date = url.searchParams.get('date') || ''
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) date = dateInZone(Date.now(), info.tz)
+      if (url.searchParams.get('week') === '1') {
+        // 七日回顧：date 是今天，看 8 天前～2 天前
+        const start = shiftDay(date, -8)
+        const end = shiftDay(date, -2)
+        return json({ week: buildWeek({ start, end, entries: await read(env, key, 'entries', start, end) }) })
+      }
       const ya = oneYearBefore(date)
       const [entries, track, steps, yaEntries, yaSummary] = await Promise.all([
         read(env, key, 'entries', date.slice(0, 8) + '01', date),
