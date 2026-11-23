@@ -1,9 +1,9 @@
-// 摳摳手帳 小工具（Scriptable）　版本 2026-11-22.14
+// 摳摳手帳 小工具（Scriptable）　版本 2026-11-23.1
 // 這份腳本由 App「設定 → 自動化 → 複製 Scriptable 腳本」產生，裡面已經填好你的網址和金鑰。
 // 用法：
-//   中型小工具：今日支出、本月預算進度、步數、最後地點、今天路線
-//   小型小工具：今日支出與本月預算；「參數」填「一年前」→ 顯示一年前的今天
-//   鎖定畫面（長方形）：今日支出與本月預算
+//   預設是「昨日回顧」：昨天的支出、本月預算進度、昨天的步數、昨天的路線（昨天的事不會再變，一天只更新幾次）
+//   中型小工具：支出、本月預算進度、步數、路線；小型小工具：支出與本月預算；鎖定畫面（長方形）：支出與本月預算
+//   「參數」填「今天」→ 改看今天（即時，但 iOS 不一定常常更新）；填「一年前」→ 顯示一年前的今天
 // 金鑰等同密碼，不要把這份腳本分享給別人。
 
 const BASE = '__BASE__'
@@ -27,7 +27,7 @@ const C = {
 }
 
 /** 小工具用的圖（App 網站上的 widget/：紙張、放大鏡、玻璃反光），下載一次存在手機上；換圖時把版本加 1 */
-const ART_VER = 11
+const ART_VER = 12
 
 /** 襯線字（iPhone 內建的 Baskerville；找不到時 iOS 會自動用系統字） */
 const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, size)
@@ -40,7 +40,7 @@ const serif = (size, style = 'SemiBold') => new Font(`Baskerville-${style}`, siz
 /** 這套行書的字形在字框裡畫得比較小、字距寬：畫的時候放大、字距收緊 */
 const CN_SCALE = 1.3
 const CN_TRACK = 0.88
-const GLYPH_SET = '今日支出　共件尚未本月剩超出今天在此走了留足印一年前的花 0123456789$,.:km'
+const GLYPH_SET = '今日支出　共件尚未本月剩超出今天在此走了留足印一年前的花昨上 0123456789$,.:km'
 /** 草寫體（iPhone 內建的 Snell Roundhand，只有英文與數字；中文 iPhone 沒有內建草書字體） */
 const script = (size, bold = true) => new Font(bold ? 'SnellRoundhand-Bold' : 'SnellRoundhand', size)
 
@@ -48,6 +48,20 @@ const WEEK_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 const WEEK_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const dayLabel = (d = new Date()) => `${WEEK_FULL[d.getDay()]}, ${MONTH_EN[d.getMonth()]} ${d.getDate()}`
+
+// ── 看哪一天：預設昨天（昨日回顧，2026-11-23 使用者要求：不需要一直更新的小工具） ──
+const PARAM = String(args.widgetParameter || '').trim()
+const SHOW_TODAY = /今天|今日|today/i.test(PARAM) || /一年前|year/i.test(PARAM)
+const SHOW_DATE = (() => {
+  const d = new Date()
+  if (!SHOW_TODAY) d.setDate(d.getDate() - 1)
+  return d
+})()
+/** 「今天」或「昨天」（昨、今繁簡同字，手寫字形裡有） */
+const DAY_WORD = SHOW_TODAY ? '今天' : '昨天'
+const DAY_SHORT = SHOW_TODAY ? '今日' : '昨日'
+/** 昨天是上個月（今天是 1 號）時，「本月」改成「上月」 */
+const MONTH_WORD = SHOW_DATE.getMonth() === new Date().getMonth() ? '本月' : '上月'
 
 /** 畫布（透明、跟螢幕倍率一樣清楚） */
 function canvas(w, h) {
@@ -323,9 +337,9 @@ const hm = (t) => {
 
 async function load() {
   const fm = FileManager.local()
-  const cache = fm.joinPath(fm.cacheDirectory(), 'ledger-widget.json')
+  const cache = fm.joinPath(fm.cacheDirectory(), `ledger-widget-${SHOW_TODAY ? 'today' : 'yesterday'}.json`)
   try {
-    const req = new Request(`${BASE}/widget?date=${dateKey(new Date())}`)
+    const req = new Request(`${BASE}/widget?date=${dateKey(SHOW_DATE)}`)
     req.headers = { Authorization: `Bearer ${KEY}` }
     req.timeoutInterval = 15
     const data = await req.loadJSON()
@@ -941,12 +955,13 @@ function routeKm(route) {
 
 /** 第一行：草寫英文日期 */
 function headerRows(stack) {
-  text(stack, dayLabel(), 13, C.primary, script(13))
+  text(stack, dayLabel(SHOW_DATE), 13, C.primary, script(13))
 }
 
-/** 金額下面的小字：今日支出・今天幾筆 */
+/** 金額下面的小字：今日支出・今天幾筆（昨日回顧：昨日支出・共幾件） */
 async function countLine(stack, d) {
   const n = d.todayCount || 0
+  if (!SHOW_TODAY) return cnText(stack, `昨日支出　共 ${n} 件`, 10, C.sub)
   await cnText(stack, n ? `今日支出　今天共 ${n} 件` : '今日支出　今日尚未支出', 10, C.sub)
 }
 
@@ -963,7 +978,7 @@ async function monthBlock(stack, d, width, showLeft = true) {
   const row = stack.addStack()
   row.layoutHorizontally()
   row.bottomAlignContent()
-  await cnText(row, '本月', 11, C.sub)
+  await cnText(row, MONTH_WORD, 11, C.sub)
   row.addSpacer(5)
   text(row, money(d.monthExpense), 14, C.text, script(14))
   if (BUDGET > 0 && showLeft) {
@@ -986,7 +1001,8 @@ async function infoRow(stack, d, stale) {
     await iconText(row, 'footprints', d.steps.toLocaleString('en-US'), 10, C.sub)
     any = true
   }
-  if (d.lastTime) {
+  // 最後定位時間只在看今天時有意義
+  if (d.lastTime && SHOW_TODAY) {
     if (any) row.addSpacer(9)
     await iconText(row, 'location', hm(d.lastTime), 10, C.sub)
     any = true
@@ -1002,7 +1018,7 @@ async function rightCard(row, d) {
   const route = d.route || []
   const view = mapView(route)
   // 不寫地名（地名的字不在手寫字形裡）
-  const top = '今天'
+  const top = DAY_WORD
   let main = '未留足印'
   if (view.route) main = `走了 ${routeKm(route).toFixed(1)} km`
   else if (view.pin) main = '在此'
@@ -1101,8 +1117,8 @@ async function yearAgoWidget(d) {
 
 function accessoryWidget(d) {
   const w = new ListWidget()
-  text(w, `今日 ${money(d.todayExpense)}`, 14, Color.white(), Font.boldSystemFont(14))
-  text(w, BUDGET > 0 ? `本月 ${Math.round((d.monthExpense / BUDGET) * 100)}% 預算` : `本月 ${money(d.monthExpense)}`, 12, Color.white())
+  text(w, `${DAY_SHORT} ${money(d.todayExpense)}`, 14, Color.white(), Font.boldSystemFont(14))
+  text(w, BUDGET > 0 ? `${MONTH_WORD} ${Math.round((d.monthExpense / BUDGET) * 100)}% 預算` : `${MONTH_WORD} ${money(d.monthExpense)}`, 12, Color.white())
   if (d.steps != null) text(w, `${d.steps.toLocaleString('en-US')} 步`, 12, Color.white())
   return w
 }
@@ -1119,9 +1135,23 @@ if (openApp) {
   await main()
 }
 
+/**
+ * 下次更新：看今天＝15 分鐘後；昨日回顧＝只在 00:10（換日）、09:00、13:00、19:00
+ * （昨天的步數要等捷徑隔天送，晚記的帳也補得到），一天 4 次，不會用掉 iOS 給的更新次數。
+ */
+function nextRefresh() {
+  const now = new Date()
+  if (SHOW_TODAY) return new Date(now.getTime() + 15 * 60 * 1000)
+  for (const [h, m] of [[0, 10], [9, 0], [13, 0], [19, 0], [24, 10]]) {
+    const t = new Date(now)
+    t.setHours(h, m, 0, 0)
+    if (t > now) return t
+  }
+}
+
 async function main() {
 const family = config.widgetFamily || 'medium'
-const param = String(args.widgetParameter || '').trim()
+const param = PARAM
 const res = await load()
 let widget
 if (res.error) widget = await errorWidget(res.error)
@@ -1130,7 +1160,7 @@ else if (family.startsWith('accessory')) widget = accessoryWidget(res.data)
 else if (family === 'small') widget = await smallWidget(res.data, res.stale)
 else widget = await mediumWidget(res.data, res.stale)
 widget.url = URLScheme.forRunningScript() + '?open=1'
-widget.refreshAfterDate = new Date(Date.now() + 15 * 60 * 1000)
+widget.refreshAfterDate = nextRefresh()
 
 if (config.runsInWidget || config.runsInAccessoryWidget) {
   Script.setWidget(widget)
