@@ -19,6 +19,7 @@ export const LOCAL_KEYS = [
   'route.legModes', // 手動選的交通方式
   'route.legEdits', // 手繪修改的路線
   'route.legCuts', // 手動切段
+  'route.entryEdits', // 從記帳點手繪的路線
   'mapStyle', // 地圖樣式
   'lastCurrency', // 上次用的幣別
 ] as const

@@ -109,8 +109,13 @@ function medianAccuracy(points: TrackPoint[]): number {
  */
 const IGNORE_RULES = { ignore_oneways: true, ignore_restrictions: true, ignore_access: true }
 
-async function valhalla(endpoint: 'trace_route' | 'route', body: { costing: string } & Record<string, unknown>, fetcher: typeof fetch): Promise<GeoPoint[]> {
-  if (body.costing !== 'pedestrian') body = { ...body, costing_options: { [body.costing]: IGNORE_RULES } }
+async function valhalla(
+  endpoint: 'trace_route' | 'route',
+  body: { costing: string } & Record<string, unknown>,
+  fetcher: typeof fetch,
+  obeyRules = false,
+): Promise<GeoPoint[]> {
+  if (body.costing !== 'pedestrian' && !obeyRules) body = { ...body, costing_options: { [body.costing]: IGNORE_RULES } }
   const res = await throttled(() => fetcher(`${VALHALLA_BASE}/${endpoint}?json=${encodeURIComponent(JSON.stringify(body))}`))
   if (!res.ok) throw new Error(`Valhalla ${res.status}`)
   const data = (await res.json()) as { trip?: { legs?: { shape: string }[] } }
@@ -462,6 +467,21 @@ export async function snapDrawn(drawn: GeoPoint[], mode: TravelMode, fetcher: ty
     return out
   } catch {
     return line
+  }
+}
+
+/**
+ * 兩個記帳點之間自動規劃路線（2026-11-24 使用者要求「兩個記帳點連接就能生成路線」）：
+ * 沒有軌跡、只知道起點和終點，用 Valhalla /route 照交通方式規劃（要遵守單行道等規則，跟比對軌跡不同）。
+ * 不貼齊（火車等）、連不上或失敗就回傳 null。
+ */
+export async function planRoute(a: GeoPoint, b: GeoPoint, mode: TravelMode, fetcher: typeof fetch = fetch): Promise<GeoPoint[] | null> {
+  if (mode === 'none') return null
+  const loc = (p: GeoPoint) => ({ lat: Math.round(p.lat * 1e6) / 1e6, lon: Math.round(p.lng * 1e6) / 1e6, type: 'break' })
+  try {
+    return await valhalla('route', { locations: [loc(a), loc(b)], costing: COSTING[mode] }, fetcher, true)
+  } catch {
+    return null
   }
 }
 
