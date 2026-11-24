@@ -371,6 +371,8 @@ export function onRouteSettingsChange(fn: () => void): () => void {
   return () => listeners.delete(fn)
 }
 const changed = () => listeners.forEach((fn) => fn())
+/** 路線設定被別的地方整份換掉時（上一步／下一步）通知畫面重讀 */
+export const notifyRouteChange = changed
 
 export interface RouteSettings {
   /** 貼齊道路總開關 */
@@ -485,21 +487,29 @@ export async function planRoute(a: GeoPoint, b: GeoPoint, mode: TravelMode, fetc
   }
 }
 
-/** 局部手繪：頭尾離原本的線超過這麼遠（公尺）就當成整段重畫 */
-const SPLICE_MAX_GAP_M = 80
+/** 局部手繪：找接回點時，比最近的位置再遠這麼多（公尺）以內的地方也算候選（同一條路去回時用） */
+const SPLICE_ALT_M = 25
 
 /**
  * 局部手繪（2026-11-22 使用者要求：不用整條重畫，只畫錯的那一小段）：
- * 畫的線頭尾各找原本的線上最近的位置，只把中間那段換成畫的線；頭尾離原本的線太遠就整段換掉。
+ * 畫的線頭尾各找原本的線上最近的位置，只把中間那段換成畫的線，前後都保留。
  * 畫的方向跟路線相反也可以（自動反過來）。
+ * 2026-11-24 使用者回報「整條線只變成我畫的那一小段」：以前頭或尾離原本的線 > 80 m 就整段換掉，
+ * 而且用貼齊道路後的頭尾去找位置（貼齊會把頭尾移走）。改成：一律只換中間（離很遠也接到最近的位置），
+ * 用手指實際畫的頭尾（ends）找位置；同一條路去回時，選換掉範圍最短的那一組接回點。
  */
-export function spliceLine(base: GeoPoint[], piece: GeoPoint[]): GeoPoint[] {
+export function spliceLine(base: GeoPoint[], piece: GeoPoint[], ends: [GeoPoint, GeoPoint] = [piece[0], piece[piece.length - 1]]): GeoPoint[] {
   if (base.length < 2 || piece.length < 2) return piece
   const o = base[0]
   const B = base.map((p) => toXY(o, p))
-  const near = (p: GeoPoint) => {
+  // 每個點沿線的累積距離
+  const cum = [0]
+  for (let i = 1; i < B.length; i++) cum.push(cum[i - 1] + Math.hypot(B[i][0] - B[i - 1][0], B[i][1] - B[i - 1][1]))
+  type Hit = { d: number; at: number; m: number }
+  /** 每一小段上最近的位置（候選） */
+  const hits = (p: GeoPoint): Hit[] => {
     const [px, py] = toXY(o, p)
-    let best = { d: Infinity, at: 0 }
+    const out: Hit[] = []
     for (let i = 0; i < B.length - 1; i++) {
       const [ax, ay] = B[i]
       const [bx, by] = B[i + 1]
@@ -507,15 +517,27 @@ export function spliceLine(base: GeoPoint[], piece: GeoPoint[]): GeoPoint[] {
       const dy = by - ay
       const len2 = dx * dx + dy * dy
       const t = len2 ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2)) : 0
-      const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-      if (d < best.d) best = { d, at: i + t }
+      out.push({ d: Math.hypot(px - (ax + t * dx), py - (ay + t * dy)), at: i + t, m: cum[i] + t * Math.sqrt(len2) })
     }
-    return best
+    const best = Math.min(...out.map((h) => h.d))
+    return out.filter((h) => h.d <= best + SPLICE_ALT_M)
   }
+  const h0 = hits(ends[0])
+  const h1 = hits(ends[1])
+  let s0 = h0[0]
+  let s1 = h1[0]
+  let bestScore = Infinity
+  for (const a of h0)
+    for (const b of h1) {
+      // 換掉的範圍越短越好，離畫的頭尾越近越好
+      const score = Math.abs(b.m - a.m) + 2 * (a.d + b.d)
+      if (score < bestScore) {
+        bestScore = score
+        s0 = a
+        s1 = b
+      }
+    }
   let pc = piece
-  let s0 = near(pc[0])
-  let s1 = near(pc[pc.length - 1])
-  if (s0.d > SPLICE_MAX_GAP_M || s1.d > SPLICE_MAX_GAP_M) return piece
   if (s0.at > s1.at) {
     pc = pc.slice().reverse()
     ;[s0, s1] = [s1, s0]

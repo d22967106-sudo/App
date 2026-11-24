@@ -369,8 +369,30 @@ describe('局部手繪：只換掉畫的那一小段', () => {
     for (let i = 1; i < south.length; i++) expect(south[i]).toBeGreaterThanOrEqual(south[i - 1] - 25)
   })
 
-  it('頭尾離原本的線超過 80 m：整段換掉', () => {
-    const piece = [P(0, 200), P(1000, 200)]
-    expect(spliceLine(base, piece)).toEqual(piece)
+  it('頭尾離原本的線很遠也不會整條只剩畫的那段：接到最近的位置，前後保留', () => {
+    const piece = [P(300, 200), P(500, 200)]
+    const out = spliceLine(base, piece)
+    expect(out.slice(0, 4)).toEqual(base.slice(0, 4))
+    expect(out.slice(-6)).toEqual(base.slice(-6))
+  })
+
+  it('貼齊道路把頭尾移走時，用手指畫的頭尾找位置', () => {
+    // 貼齊後的線頭尾跑到 0 m、1000 m 附近（比對錯），手指實際畫的是 300～500 m
+    const snapped = [P(0, 30), P(400, 60), P(1000, 30)]
+    const out = spliceLine(base, snapped, [P(300, 5), P(500, 5)])
+    expect(out.slice(0, 4)).toEqual(base.slice(0, 4))
+    expect(out.slice(-6)).toEqual(base.slice(-6))
+  })
+
+  it('同一條路去回：選換掉範圍最短的接回點', () => {
+    // 往南 1000 m 再原路回來
+    const there = [0, 200, 400, 600, 800, 1000].map((m) => P(m, 0))
+    const back = [800, 600, 400, 200, 0].map((m) => P(m, 0))
+    const line = [...there, ...back]
+    // 在回程 600 → 400 m 之間畫一小段（往東繞）
+    const out = spliceLine(line, [P(600, 3), P(500, 50), P(400, 3)])
+    expect(out.length).toBeGreaterThan(line.length)
+    // 去程整段保留（前 6 點不變）
+    expect(out.slice(0, 6)).toEqual(there)
   })
 })

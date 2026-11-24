@@ -22,6 +22,10 @@ export function onEntryEditsChange(fn: () => void): () => void {
   return () => listeners.delete(fn)
 }
 
+export function notifyEntryEdits(): void {
+  listeners.forEach((fn) => fn())
+}
+
 /** 某一天的手繪路線（key＝紀錄 id） */
 export async function getEntryEdits(date: string): Promise<EntryEdits> {
   const all = (await getMeta<EditMap>(KEY)) ?? {}

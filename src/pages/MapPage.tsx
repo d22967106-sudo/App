@@ -16,6 +16,7 @@ import { useStayNames } from '../lib/stayNames'
 import { applyCuts, carryPoint, computeLegs, guessMode, isCarry, modeName, TRAVEL_MODES, withCarry, type Leg, type TravelMode } from '../lib/legs'
 import { getLegCuts, getLegEdits, getLegModes, planRoute, updateLegCuts, getRouteSettings, getSnapCache, onRouteSettingsChange, setLegEdit, setLegMode, snapDrawn, snapLeg, spliceLine, DEFAULT_ROUTE_SETTINGS, type RouteSettings } from '../lib/snap'
 import { isAuto, MAX_ACCURACY } from '../lib/stays'
+import { historyState, onHistoryChange, redoRoute, routeStep, undoRoute } from '../lib/routeHistory'
 import { entryEditLine, getEntryEdits, lineKm, nextAnchor, onEntryEditsChange, routeWithEntryEdits, setEntryEdit, type EntryEdits } from '../lib/entryRoute'
 import type { Entry, GeoPoint } from '../lib/types'
 
@@ -235,12 +236,13 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
     setDrawBusy(false)
     if (!line) {
       if (entryMode === 'none') {
-        await setEntryEdit(date, e.id, [e.location, cardNext])
+        const loc = e.location
+        await routeStep(() => setEntryEdit(date, e.id, [loc, cardNext]))
         return toast('已用直線連起來（不貼齊）')
       }
       return toast('規劃路線失敗（連不上路線服務），可以改用手繪', 3500)
     }
-    await setEntryEdit(date, e.id, line)
+    await routeStep(() => setEntryEdit(date, e.id, line))
     toast(`已沿道路連到下一個地點（${modeName(entryMode)}）`)
   }
   const anchorLabel = (p: RoutePoint): string => {
@@ -401,8 +403,11 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
       return toast('選的是整段，不用切；直接在下面選交通方式就好', 3000)
     }
     // 切開後原本手繪修改的線對不上了，拿掉
-    if (editOf(pickedLeg)) await setLegEdit(date, pickedLeg.id, null)
-    await updateLegCuts(date, [a, b].filter((x) => x !== pickedLeg.start && x !== pickedLeg.end))
+    const leg = pickedLeg
+    await routeStep(async () => {
+      if (editOf(leg)) await setLegEdit(date, leg.id, null)
+      await updateLegCuts(date, [a, b].filter((x) => x !== leg.start && x !== leg.end))
+    })
     setCutting(null)
     setLegSel(`leg-${a}`)
     toast(`已切出 ${formatTime(a)}–${formatTime(b)}，可以選這段的交通方式`, 3000)
@@ -411,8 +416,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   const onUncut = async (l: Leg) => {
     const remove = [...(l.cutStart ? [l.start] : []), ...(l.cutEnd ? [l.end] : [])]
     // 合併後的段 id 會變，切點兩邊的手繪修改都對不上，拿掉
-    for (const x of legs) if ((x.end === l.start && l.cutStart) || (x.start === l.end && l.cutEnd) || x === l) if (editOf(x)) await setLegEdit(date, x.id, null)
-    await updateLegCuts(date, [], remove)
+    await routeStep(async () => {
+      for (const x of legs) if ((x.end === l.start && l.cutStart) || (x.start === l.end && l.cutEnd) || x === l) if (editOf(x)) await setLegEdit(date, x.id, null)
+      await updateLegCuts(date, [], remove)
+    })
     setLegSel(null)
     toast('已合併回前後段')
   }
@@ -557,6 +564,16 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
   }, [selected])
 
   const loaded = entries && track
+
+  // 路線操作的上一步／下一步
+  const [hist, setHist] = useState(historyState)
+  useEffect(() => onHistoryChange(() => setHist(historyState())), [])
+  const busyDraw = drawing || !!entryCard?.drawing || cutting != null || drawBusy
+  // 手繪、選點切段時藏起來（不要擋到要畫的地方）
+  const showHist = (hist.canUndo || hist.canRedo) && !(drawing || entryCard?.drawing || cutting != null) && !pickedLeg && !cardEntry
+  const onUndo = async () => (await undoRoute()) && toast('已回到上一步')
+  const onRedo = async () => (await redoRoute()) && toast('已到下一步')
+  const histCtl: HistCtl | undefined = hist.canUndo || hist.canRedo ? { canUndo: hist.canUndo && !busyDraw, canRedo: hist.canRedo && !busyDraw, onUndo, onRedo } : undefined
   const legIndex = pickedLeg ? legs.indexOf(pickedLeg) : -1
   const pickLeg = (id: string | null) => {
     setLegSel(id)
@@ -590,10 +607,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
             const piece = routeSettings.snap ? await snapDrawn(pts, entryMode) : pts
             // 已經畫過：只換掉畫的那一小段（跟路段的手繪修改一樣）
             const base = entryLine(e, cardNext)
-            const line = base ? spliceLine(base, piece) : piece
-            await setEntryEdit(date, e.id, line)
+            const line = base ? spliceLine(base, piece, [pts[0], pts[pts.length - 1]]) : piece
+            await routeStep(() => setEntryEdit(date, e.id, line))
             setDrawBusy(false)
-            toast(!base ? '已畫好路線' : line === piece ? '已用你畫的路線取代整條' : '已修改你畫的那一小段')
+            toast(!base ? '已畫好路線' : '已修改你畫的那一小段')
             return
           }
           if (!pickedLeg) return
@@ -601,12 +618,13 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           setDrawBusy(true)
           const mode = modeOf(pickedLeg).mode
           const piece = routeSettings.snap ? await snapDrawn(pts, mode) : pts
-          // 只換掉畫的那一小段（頭尾接回目前的線）；頭尾離目前的線太遠才整段換掉
+          // 只換掉畫的那一小段（頭尾接回目前的線最近的位置），前後都保留
           const base = legLine(pickedLeg)
-          const line = spliceLine(base, piece)
-          await setLegEdit(date, pickedLeg.id, line)
+          const line = spliceLine(base, piece, [pts[0], pts[pts.length - 1]])
+          const leg = pickedLeg
+          await routeStep(() => setLegEdit(date, leg.id, line))
           setDrawBusy(false)
-          toast(line === piece ? '已用你畫的路線取代整段' : '已修改你畫的那一小段')
+          toast('已修改你畫的那一小段')
         }}
         // 對焦只看這段的定位點：手繪修改或貼齊完成時畫面不會跳（一段一段修改時才找得到剛才的位置）
         focus={cardEntry?.location ? [cardEntry.location, ...(cardNext ? [cardNext] : [])] : pickedLeg ? pickedLeg.points : null}
@@ -623,7 +641,7 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
         playhead={playhead}
         myLocation={myPos}
         fallbackCenter={lastPos ?? TAIPEI}
-        bottomPadding={(pickedLeg || cardEntry ? LEG_SHEET_H : peek) + 56}
+        bottomPadding={(pickedLeg || cardEntry ? LEG_SHEET_H : peek) + 56 + (showHist ? 50 : 0)}
         topPadding={pickedLeg ? 300 : cardEntry ? (entryCard?.drawing ? 160 : 230) : 70}
         ariaLabel={`${formatDateLong(date)}的路線地圖`}
       />
@@ -669,16 +687,17 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           onPrev={() => pickLeg(legs[legIndex - 1].id)}
           onNext={() => pickLeg(legs[legIndex + 1].id)}
           onClose={() => pickLeg(null)}
-          onMode={(m) => setLegMode(date, pickedLeg.id, m)}
+          onMode={(m) => routeStep(() => setLegMode(date, pickedLeg.id, m))}
           km={legKm(pickedLeg)}
           edited={!!editOf(pickedLeg)}
           drawing={drawing}
           drawBusy={drawBusy}
           onDraw={() => setDrawing((d) => !d)}
-          onRestore={() => setLegEdit(date, pickedLeg.id, null)}
+          onRestore={() => routeStep(() => setLegEdit(date, pickedLeg.id, null))}
           cutting={cutting}
           onCut={() => setCutting((c) => (c == null ? 'start' : null))}
           onUncut={pickedLeg.cutStart || pickedLeg.cutEnd ? () => onUncut(pickedLeg) : null}
+          hist={histCtl}
         />
       ) : cardEntry && entryCard ? (
         <EntryRouteCard
@@ -696,9 +715,10 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           onMode={setEntryMode}
           onAuto={cardNext ? () => autoEntryRoute(cardEntry) : null}
           onDraw={() => setEntryCard({ id: cardEntry.id, drawing: !entryCard.drawing })}
+          hist={histCtl}
           onCancelDraw={() => (entryEdits[cardEntry.id] ? setEntryCard({ id: cardEntry.id, drawing: false }) : setEntryCard(null))}
           onDelete={async () => {
-            await setEntryEdit(date, cardEntry.id, null)
+            await routeStep(() => setEntryEdit(date, cardEntry.id, null))
             setEntryCard(null)
             toast('已刪除這條手繪路線')
           }}
@@ -729,6 +749,19 @@ export function MapPage({ date: rawDate }: { date: string | null }) {
           <Icon name="plus" size={28} strokeWidth={2.4} />
         </button>
       </div>
+
+      {showHist && (
+        <div className="history-bar" style={{ bottom: `calc(var(--tabbar-h) + ${height + 16}px)` }} hidden={expanded}>
+          <button aria-label="上一步" disabled={!hist.canUndo || busyDraw} onClick={onUndo}>
+            <Icon name="undo" size={18} />
+            上一步
+          </button>
+          <button aria-label="下一步" disabled={!hist.canRedo || busyDraw} onClick={onRedo}>
+            <Icon name="redo" size={18} />
+            下一步
+          </button>
+        </div>
+      )}
 
       <section className={`sheet${dragging ? ' dragging' : ''}`} style={{ height }} aria-label="當天紀錄">
         <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
@@ -922,6 +955,7 @@ function LegCard({
   cutting,
   onCut,
   onUncut,
+  hist,
 }: {
   leg: Leg
   title: string
@@ -943,6 +977,7 @@ function LegCard({
   cutting: null | 'start' | number
   onCut: () => void
   onUncut: (() => void) | null
+  hist?: HistCtl
 }) {
   const dur = leg.end - leg.start
   // 畫線時卡片縮成一行，讓出地圖空間
@@ -972,9 +1007,12 @@ function LegCard({
     <section className="leg-card" aria-label={`移動：${title}`}>
       <div className="leg-card-head">
         <strong>{title}</strong>
-        <button className="leg-all" onClick={onClose}>
-          看全天
-        </button>
+        <span className="leg-head-btns">
+          {hist && <HistoryButtons {...hist} />}
+          <button className="leg-all" onClick={onClose}>
+            看全天
+          </button>
+        </span>
       </div>
       <div className="leg-stats">
         <div>
@@ -1055,6 +1093,7 @@ function EntryRouteCard({
   onCancelDraw,
   onDelete,
   onClose,
+  hist,
 }: {
   title: string
   next: string | null
@@ -1070,6 +1109,7 @@ function EntryRouteCard({
   onCancelDraw: () => void
   onDelete: () => void
   onClose: () => void
+  hist?: HistCtl
 }) {
   const where = next ? `畫到下一個地點「${next}」` : withLegs ? '畫到你去的地方（這是當天最後一筆有地點的紀錄）' : '畫到你去的地方（這是當天最後一個地點）'
   if (drawing)
@@ -1089,9 +1129,12 @@ function EntryRouteCard({
         <strong>
           {title} → {next ?? '…'}
         </strong>
-        <button className="leg-all" onClick={onClose}>
-          看全天
-        </button>
+        <span className="leg-head-btns">
+          {hist && <HistoryButtons {...hist} />}
+          <button className="leg-all" onClick={onClose}>
+            看全天
+          </button>
+        </span>
       </div>
       <label className="leg-mode">
         <span>{km != null ? `${km} km` : '還沒有路線'} · 交通方式</span>
@@ -1121,5 +1164,21 @@ function EntryRouteCard({
         )}
       </div>
     </section>
+  )
+}
+
+type HistCtl = { canUndo: boolean; canRedo: boolean; onUndo: () => void; onRedo: () => void }
+
+/** 卡片標題列上的上一步／下一步（小圖示） */
+function HistoryButtons({ canUndo, canRedo, onUndo, onRedo }: HistCtl) {
+  return (
+    <>
+      <button className="leg-all leg-hist" aria-label="上一步" disabled={!canUndo} onClick={onUndo}>
+        <Icon name="undo" size={16} />
+      </button>
+      <button className="leg-all leg-hist" aria-label="下一步" disabled={!canRedo} onClick={onRedo}>
+        <Icon name="redo" size={16} />
+      </button>
+    </>
   )
 }

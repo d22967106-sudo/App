@@ -322,6 +322,42 @@ button:disabled {
   transition: bottom 0.25s ease;
 }
 
+.history-bar {
+  position: absolute;
+  left: 16px;
+  z-index: 600;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--card);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  transition: bottom 0.25s ease;
+}
+
+.history-bar[hidden] {
+  display: none;
+}
+
+.history-bar button {
+  height: 40px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 20px;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-bar button:disabled {
+  color: var(--text-2);
+  opacity: 0.5;
+}
+
 .checkin-btn {
   width: 48px;
   height: 48px;
@@ -3107,6 +3143,26 @@ button:disabled {
   font: inherit;
   font-size: 13px;
   flex-shrink: 0;
+}
+
+.leg-head-btns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.leg-hist {
+  width: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+}
+
+.leg-hist:disabled {
+  color: var(--text-2);
+  opacity: 0.5;
 }
 
 .leg-stats {

@@ -71,6 +71,8 @@ const PATHS = {
     </>
   ),
   trash: <path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6" />,
+  undo: <path d="M9 14l-5-5 5-5M4 9h10a6 6 0 0 1 0 12h-3" />,
+  redo: <path d="M15 14l5-5-5-5M20 9H10a6 6 0 0 0 0 12h3" />,
   play: <path d="M7 5v14l11-7z" />,
   pause: <path d="M8 5v14M16 5v14" />,
   locate: (
