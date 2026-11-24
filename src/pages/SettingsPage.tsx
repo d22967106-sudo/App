@@ -3,6 +3,7 @@ import { Icon } from '../components/Icon'
 import { MapStylePicker } from '../components/MapStylePicker'
 import { toast } from '../components/ui'
 import { buildBackup, restoreBackup, shareOrDownload } from '../lib/backup'
+import { buildLocalSettings, restoreLocalSettings } from '../lib/localSettings'
 import { getAllEntries, requestPersistentStorage } from '../lib/db'
 import { goBack, navigate, useLiveQuery } from '../lib/hooks'
 import { onCloudChange } from '../lib/cloud'
@@ -19,6 +20,7 @@ export function SettingsPage() {
   const [persisted, setPersisted] = useState<boolean | null>(null)
   const [usage, setUsage] = useState<string>('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const localRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     navigator.storage?.persisted?.().then(setPersisted).catch(() => setPersisted(null))
@@ -68,6 +70,31 @@ export function SettingsPage() {
       toast('匯入失敗：' + (e as Error).message, 5000)
     } finally {
       setBusy(null)
+    }
+  }
+
+  // 本機設定（雲端登入、自動化金鑰、路線修改…）：刪掉主畫面 App 重新加入前先匯出，加入後匯入
+  const exportLocal = async () => {
+    try {
+      const data = await buildLocalSettings()
+      const d = new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const name = `摳摳手帳-本機設定-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`
+      await shareOrDownload(new Blob([JSON.stringify(data)], { type: 'application/json' }), name)
+      toast(`已匯出 ${Object.keys(data.meta).length} 項設定`)
+    } catch (e) {
+      toast('匯出失敗：' + (e as Error).message, 4000)
+    }
+  }
+  const importLocal = async (file: File | undefined) => {
+    if (!file) return
+    if (!confirm('匯入本機設定會覆蓋這支手機上的雲端登入、自動化金鑰、路線修改等設定。要繼續嗎？')) return
+    try {
+      const n = await restoreLocalSettings(await file.text())
+      toast(`已匯入 ${n} 項設定，重新載入中…`, 2500)
+      setTimeout(() => location.reload(), 1200)
+    } catch (e) {
+      toast('匯入失敗：' + (e as Error).message, 5000)
     }
   }
 
@@ -137,6 +164,31 @@ export function SettingsPage() {
             hidden
             onChange={(e) => {
               doImport(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
+          <h3 className="section-title" style={{ margin: '8px 0 0', fontSize: 15 }}>
+            本機設定
+          </h3>
+          <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+            雲端登入、自動化金鑰、路線的手繪修改／切段／交通方式、地圖樣式、預算只存在這支手機上（上面的「匯出全部資料」不含這些）。
+            要刪掉主畫面上的 App 重新加入前，先匯出這個檔案；重新加入後再匯入，就不用重新設定。檔案裡有金鑰和登入狀態，等同密碼，不要傳給別人，用完可以刪掉。
+          </p>
+          <button className="btn-outline" onClick={exportLocal} disabled={busy != null}>
+            <Icon name="download" size={18} />
+            匯出本機設定
+          </button>
+          <button className="btn-outline" onClick={() => localRef.current?.click()} disabled={busy != null}>
+            <Icon name="upload" size={18} />
+            匯入本機設定
+          </button>
+          <input
+            ref={localRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(e) => {
+              importLocal(e.target.files?.[0])
               e.target.value = ''
             }}
           />
