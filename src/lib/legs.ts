@@ -155,6 +155,32 @@ export function dropWobble(pts: TrackPoint[]): TrackPoint[] {
   }
 }
 
+/** 超過這麼久沒收到點＝定位中斷（Overland 被關掉、沒電…），在那裡切開 */
+export const NO_DATA_MS = 20 * 60 * 1000
+
+/**
+ * 中斷前後相距超過這麼遠（公尺）才算「中間有移動但沒記到」。
+ * 待在家時 iPhone 會暫停定位，出門後要移動幾百公尺才恢復，第一個點本來就離家一段距離，那種照舊接起來；
+ * 2026-11-24 關掉 Overland 那次，恢復時已經離住宿 4.8 km。
+ */
+export const NO_DATA_MOVE_M = 2000
+
+/** 相鄰兩點相隔超過 NO_DATA_MS、而且位置差超過 NO_DATA_MOVE_M 就切開 */
+export function splitAtNoData(pts: TrackPoint[]): TrackPoint[][] {
+  const out: TrackPoint[][] = []
+  let cur: TrackPoint[] = []
+  for (const p of pts) {
+    const last = cur[cur.length - 1]
+    if (last && p.time - last.time > NO_DATA_MS && distanceM(last, p) > NO_DATA_MOVE_M) {
+      out.push(cur)
+      cur = []
+    }
+    cur.push(p)
+  }
+  if (cur.length) out.push(cur)
+  return out
+}
+
 /** 停留的中心當成一個點（移動段從上一個停留的中心畫到下一個停留的中心） */
 function stayPoint(s: Stay, time: number, date: string): TrackPoint {
   return { id: `${s.id}-c${time}`, time, date, lat: s.lat, lng: s.lng, source: 'auto' }
@@ -182,12 +208,18 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
     // 所以頭尾接上停留的中心：從哪裡出發、到了哪裡，線一定接得起來
     const date = raw[0]?.date ?? pts[0].date
     const withEnds = [...(g.from ? [stayPoint(g.from, g.t0, date)] : []), ...raw.filter((p) => !(g.from && p.time === g.t0) && !(g.to && p.time === g.t1)), ...(g.to ? [stayPoint(g.to, g.t1, date)] : [])]
-    const seg = dropWobble(cleanPath(withEnds, LEG_MAX_STEP_M, 15))
-    if (seg.length < 2) continue
+    const whole = dropWobble(cleanPath(withEnds, LEG_MAX_STEP_M, 15))
+    // 定位中斷（超過 NO_DATA_MS 沒收到點，例如 Overland 被關掉）就切開，中間不畫線、不算時間：
+    // 2026-11-24 使用者中途關掉 Overland，04:36 住宿到 10:35 已在路上被接成一段，貼齊道路補出一段沒走過的路
+    const pieces = splitAtNoData(whole)
+    pieces.forEach((seg, pi) => {
+    const from = pi === 0 ? g.from : null
+    const to = pi === pieces.length - 1 ? g.to : null
+    if (seg.length < 2) return
     const km = pathKm(seg)
-    const distinct = distinctStays(g.from, g.to)
-    if (km * 1000 < MIN_LEG_M && !distinct) continue
-    if (km * 1000 < SHORT_LEG_M && !reallyMoved(raw, g.from, g.to, maxSpeed(seg))) continue
+    const distinct = distinctStays(from, to)
+    if (km * 1000 < MIN_LEG_M && !distinct) return
+    if (km * 1000 < SHORT_LEG_M && !reallyMoved(raw.filter((p) => p.time >= seg[0].time && p.time <= seg[seg.length - 1].time), from, to, maxSpeed(seg))) return
     const parts = splitByMode(seg)
     parts.forEach((part, k) => {
       const pk = pathKm(part.points)
@@ -197,14 +229,15 @@ export function computeLegs(track: TrackPoint[], stays: Stay[]): Leg[] {
         start: part.points[0].time,
         end: part.points[part.points.length - 1].time,
         points: part.points,
-        from: k === 0 ? g.from : null,
-        to: k === parts.length - 1 ? g.to : null,
+        from: k === 0 ? from : null,
+        to: k === parts.length - 1 ? to : null,
         km: Math.round(pk * 10) / 10,
         avgKmh: hours > 0 ? pk / hours : 0,
         maxKmh: maxSpeed(part.points),
-        ...(k > 0 ? { fromLabel: parts[k - 1].walk ? '取車處' : '停車處' } : {}),
-        ...(k < parts.length - 1 ? { toLabel: part.walk ? '取車處' : '停車處' } : {}),
+        ...(k > 0 ? { fromLabel: parts[k - 1].walk ? '取車處' : '停車處' } : pi > 0 ? { fromLabel: '定位中斷後' } : {}),
+        ...(k < parts.length - 1 ? { toLabel: part.walk ? '取車處' : '停車處' } : pi < pieces.length - 1 ? { toLabel: '定位中斷' } : {}),
       })
+    })
     })
   }
   return legs

@@ -396,3 +396,21 @@ describe('局部手繪：只換掉畫的那一小段', () => {
     expect(out.slice(0, 6)).toEqual(there)
   })
 })
+
+describe('定位中斷', () => {
+  it('Overland 被關掉：04:36 在住宿、10:35 已在 4.8 km 外，中間不接起來，移動從 10:35 開始', () => {
+    const d = '2026-11-24'
+    const lodging = { lat: 24.805841, lng: 120.96946 }
+    const pts: TrackPoint[] = [at(d, '04:36', lodging, 8)]
+    // 10:35 起每分鐘一點往西南騎
+    for (let i = 0; i < 30; i++) pts.push(at(d, `${10 + Math.floor((35 + i) / 60)}:${String((35 + i) % 60).padStart(2, '0')}`, { lat: 24.827267 - i * 0.004, lng: 120.927508 - i * 0.002 }, 3))
+    for (const t of ['11:20', '11:30', '11:40']) pts.push(at(d, t, { lat: 24.827267 - 30 * 0.004, lng: 120.927508 - 30 * 0.002 }, 5))
+    const carry = carryPoint(d, [at('2026-11-23', '23:50', lodging)])
+    const track = withCarry(pts, carry)
+    const legs = computeLegs(track, dayStays(track))
+    expect(legs).toHaveLength(1)
+    expect(new Date(legs[0].start).getHours()).toBe(10)
+    expect(legs[0].fromLabel).toBe('定位中斷後')
+    expect(legs[0].points.every((p) => distanceM(p, lodging) > 2000)).toBe(true)
+  })
+})
