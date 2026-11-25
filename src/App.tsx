@@ -1,9 +1,10 @@
 import { useEffect } from 'react'
-import { TabBar, ToastHost } from './components/ui'
+import { TabBar, toast, ToastHost } from './components/ui'
 import { requestPersistentStorage } from './lib/db'
 import { useRoute } from './lib/hooks'
 import { loadRates } from './lib/rates'
 import { installAutomationHooks } from './lib/automation'
+import { setQuotaNotifier } from './lib/photoQuota'
 import { startAutoSync } from './lib/sync'
 import { DayPage } from './pages/DayPage'
 import { EntryPage } from './pages/EntryPage'
@@ -22,6 +23,7 @@ export default function App() {
     requestPersistentStorage()
     loadRates().catch(() => {})
     installAutomationHooks()
+    setQuotaNotifier((text) => toast(text, 6000))
     startAutoSync()
   }, [])
 

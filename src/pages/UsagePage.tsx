@@ -7,6 +7,7 @@ import { cacheUsage, localCounts } from '../lib/db'
 import { goBack } from '../lib/hooks'
 import { parseDateKey } from '../lib/ledger'
 import { cloudReady } from '../lib/sync'
+import { quotaMessage, savePhotoQuota } from '../lib/photoQuota'
 import { DB_LIMIT, formatBytes, PHOTO_LIMIT, yearsLeft, yearsText } from '../lib/usage'
 
 interface DbUsage {
@@ -75,7 +76,10 @@ export function UsagePage() {
             .then(async (r) => (db = (await r.json()) as DbUsage))
             .catch((e) => (db = e instanceof CloudError && (e.status === 404 || /找不到資料表|usage_stats/.test(e.message)) ? 'need-sql' : String((e as Error).message))),
           fetchPhotoUsage()
-            .then((r) => (photos = r ?? 'old-worker'))
+            .then((r) => {
+              photos = r ?? 'old-worker'
+              if (r) savePhotoQuota(r.bytes, r.objects).catch(() => {})
+            })
             .catch((e) => (photos = (e as Error).message)),
         ])
       }
@@ -184,6 +188,7 @@ export function UsagePage() {
                     <span> / 10 GB</span>
                   </div>
                   <Meter used={photos.bytes} limit={PHOTO_LIMIT} />
+                  {quotaMessage(photos.bytes) && <p className="hint quota-text" style={{ margin: 0 }}>{quotaMessage(photos.bytes)}</p>}
                   <p className="hint" style={{ margin: 0 }}>
                     {yearsText(st.local.firstPhotoAt ? yearsLeft(photos.bytes, PHOTO_LIMIT, photos.bytes, daysSince(st.local.firstPhotoAt)) : null)}
                   </p>

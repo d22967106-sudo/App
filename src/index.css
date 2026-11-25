@@ -3285,3 +3285,29 @@ button:disabled {
   padding: 0 10px;
   font-size: 13px;
 }
+
+/* 照片空間快滿的提醒 */
+.quota-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: #fbeee8;
+  color: var(--danger);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: left;
+}
+.quota-warn svg {
+  flex: none;
+  margin-top: 2px;
+}
+.quota-text,
+.settings-link small.quota-text {
+  color: var(--danger);
+}

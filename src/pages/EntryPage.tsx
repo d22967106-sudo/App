@@ -21,6 +21,7 @@ import {
   relativeDayLabel,
   toDateKey,
 } from '../lib/ledger'
+import { usePhotoQuotaMessage } from '../lib/photoQuota'
 import { processPhoto } from '../lib/photos'
 import { commonAmount, rememberPlace, suggestPlaces, type PlaceSuggestion } from '../lib/places'
 import { getRate } from '../lib/rates'
@@ -55,6 +56,7 @@ function defaultTime(date: string | null): number {
 
 export function EntryPage({ id, date }: Props) {
   const isNew = id == null
+  const quotaMsg = usePhotoQuotaMessage()
   const [loaded, setLoaded] = useState(isNew)
   const [original, setOriginal] = useState<Entry | null>(null)
   const entryId = useRef(id ?? newId()).current
@@ -622,6 +624,12 @@ export function EntryPage({ id, date }: Props) {
         />
       </div>
 
+      {quotaMsg && (
+        <button type="button" className="quota-warn" onClick={() => navigate('usage')}>
+          <Icon name="cloud" size={16} />
+          <span>{quotaMsg}</span>
+        </button>
+      )}
       <div className="photo-row">
         {photoIds.map((pid) => {
           const fresh = newPhotos.find((p) => p.id === pid)

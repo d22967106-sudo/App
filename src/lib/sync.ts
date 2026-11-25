@@ -29,6 +29,7 @@ import {
   type RemoteRow,
   type SyncTable,
 } from './db'
+import { checkPhotoQuota } from './photoQuota'
 import type { Photo } from './types'
 
 /**
@@ -268,6 +269,8 @@ async function syncOnce(): Promise<void> {
     if ((await getConfig())?.photoUrl) {
       const missing = new Set([...needThumb, ...(await photosMissingThumb())])
       await downloadThumbs([...missing])
+      // 照片空間一天查一次，快滿時提醒（查不到不算同步失敗）
+      checkPhotoQuota().catch(() => {})
     }
     await afterSync()
     const now = Date.now()

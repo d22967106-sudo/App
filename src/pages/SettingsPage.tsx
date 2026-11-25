@@ -7,6 +7,7 @@ import { buildLocalSettings, restoreLocalSettings } from '../lib/localSettings'
 import { getAllEntries, requestPersistentStorage } from '../lib/db'
 import { goBack, navigate, useLiveQuery } from '../lib/hooks'
 import { onCloudChange } from '../lib/cloud'
+import { usePhotoQuotaMessage } from '../lib/photoQuota'
 import { cloudReady } from '../lib/sync'
 import { AutomationSection } from './AutomationSection'
 import { TRAVEL_MODES, type TravelMode } from '../lib/legs'
@@ -16,6 +17,7 @@ import { CloudSection } from './CloudSection'
 /** 設定：雲端同步、自動化、地圖樣式、使用狀況、備份（從統計頁右上齒輪進來） */
 export function SettingsPage() {
   const entries = useLiveQuery(() => getAllEntries(), [])
+  const quotaMsg = usePhotoQuotaMessage()
   const [busy, setBusy] = useState<'export' | 'import' | null>(null)
   const [persisted, setPersisted] = useState<boolean | null>(null)
   const [usage, setUsage] = useState<string>('')
@@ -113,7 +115,7 @@ export function SettingsPage() {
           <Icon name="stats" size={20} />
           <span>
             <strong>使用狀況</strong>
-            <small>雲端資料庫、照片空間還剩多少</small>
+            {quotaMsg ? <small className="quota-text">{quotaMsg}</small> : <small>雲端資料庫、照片空間還剩多少</small>}
           </span>
           <Icon name="chevronRight" size={18} />
         </button>
